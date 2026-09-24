@@ -46,6 +46,14 @@
                     </script>
                 </div>
                 <p class="text-muted small">Нажмите кнопку выше и подтвердите вход — почта привяжется к этому Telegram автоматически, и вы попадете в кабинет.</p>
+
+                <div class="d-flex align-items-center my-3">
+                    <hr class="flex-grow-1 my-0"><span class="mx-2 text-muted small">или</span><hr class="flex-grow-1 my-0">
+                </div>
+                <a class="btn btn-primary w-100 rounded-pill mb-2" href="https://t.me/{{ bot_username }}?start=web_login">
+                    🤖 Привязать через бота
+                </a>
+                <p class="text-muted small">Если виджет выше не отображается: откройте бота, нажмите <b>Старт</b> и перейдите по кнопке входа <b>в этом же браузере</b> — почта привяжется автоматически.</p>
                 {% endif %}
 
                 <hr class="my-4">

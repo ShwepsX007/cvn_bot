@@ -158,6 +158,16 @@ def init_db():
                         used INTEGER DEFAULT 0
                     )''')
 
+    # Одноразовые токены входа в кабинет сайта ЧЕРЕЗ БОТА (deep-link /start web_login):
+    # бот выдает ссылку на {site_url}/auth/bot?token=..., сайт по ней авторизует tg_id.
+    # Нужно потому, что виджет входа Telegram нередко блокируют по IP/в браузерах.
+    cursor.execute('''CREATE TABLE IF NOT EXISTS tg_login_tokens (
+                        token TEXT PRIMARY KEY,
+                        tg_id INTEGER NOT NULL,
+                        expires_at TIMESTAMP NOT NULL,
+                        used INTEGER DEFAULT 0
+                    )''')
+
     conn.commit()
     conn.close()
 
@@ -444,6 +454,41 @@ def consume_email_token(token, kind):
         conn.commit()
     conn.close()
     return row
+
+
+# --- ОДНОРАЗОВЫЕ ТОКЕНЫ ВХОДА НА САЙТ ЧЕРЕЗ БОТА (tg_login_tokens) ---
+def create_tg_login_token(tg_id, ttl_seconds=600):
+    """Ссылка на вход в кабинет, выданная ботом. Живет 10 минут, одноразовая."""
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(24)
+    expires = (datetime.now() + timedelta(seconds=ttl_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO tg_login_tokens (token, tg_id, expires_at) VALUES (?, ?, ?)",
+        (token, tg_id, expires)
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+def consume_tg_login_token(token):
+    """tg_id если токен был жив (и сразу расходуется); иначе None."""
+    if not token:
+        return None
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT tg_id FROM tg_login_tokens WHERE token=? AND used=0 AND expires_at > ?",
+        (token, now)
+    )
+    row = cursor.fetchone()
+    if row:
+        cursor.execute("UPDATE tg_login_tokens SET used=1 WHERE token=?", (token,))
+        conn.commit()
+    conn.close()
+    return row[0] if row else None
 
 
 def get_expired_users():

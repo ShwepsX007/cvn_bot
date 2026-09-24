@@ -68,15 +68,21 @@
                                 data-request-access="write">
                             </script>
                         </div>
+
+                        <div class="d-flex align-items-center my-3">
+                            <hr class="flex-grow-1 my-0"><span class="mx-2 text-muted small">или</span><hr class="flex-grow-1 my-0">
+                        </div>
+
+                        <a class="btn btn-primary w-100 rounded-pill mb-2" href="https://t.me/{{ bot_username }}?start=web_login">
+                            🤖 Войти / зарегистрироваться через бота
+                        </a>
+                        <p class="text-muted small">Если серая/синяя кнопка Telegram выше не отображается (виджет часто блокируют): откройте бота по кнопке выше, нажмите <b>Старт</b> — бот запомнит ваш аккаунт и пришлет кнопку входа в кабинет.</p>
                         {% else %}
                         <div class="alert alert-warning rounded-3 small">Вход временно недоступен (бот не отвечает). Попробуйте позже или войдите по почте.</div>
                         {% endif %}
 
                         <hr class="my-4">
 
-                        <p class="text-muted small mb-2">
-                            ⚠️ Виджет входа Telegram может не открыться без активного VPN-соединения.
-                        </p>
                         <a href="/" class="btn btn-outline-primary rounded-pill">
                             ⚡ Получить временный конфиг (без Telegram)
                         </a>

@@ -241,6 +241,35 @@ async def auth_telegram(request: Request):
 
     return RedirectResponse(url="/dashboard")
 
+@app.get("/auth/bot")
+async def auth_bot(request: Request):
+    """Вход в кабинет по одноразовой ссылке, которую выдает бот (/start web_login).
+    Замена Telegram-виджету: работает даже там, где виджет заблокирован."""
+    token = str(request.query_params.get("token") or "")
+    tg_id = await asyncio.to_thread(bot_db.consume_tg_login_token, token) if token else None
+    if not tg_id:
+        return RedirectResponse(url="/login?error=" + quote(
+            "Ссылка для входа недействительна или истекла - откройте бота и нажмите /start по кнопке со страницы входа еще раз."
+        ), status_code=303)
+
+    profile = bot_db.get_user_profile(tg_id)
+    full_name = (profile[0] if profile and profile[0] else None) or (f"@{profile[1]}" if profile and profile[1] else str(tg_id))
+
+    request.session["tg_id"] = tg_id
+    request.session["display_name"] = full_name
+
+    # Если до этого входили по почте - довязываем email к этому Telegram-аккаунту
+    email = _current_email(request)
+    if email:
+        try:
+            acc = bot_db.get_email_account(email)
+            if acc and (not acc[3] or acc[3] == tg_id):
+                bot_db.bind_email_to_tg(email, tg_id)
+        except Exception as e:
+            print(f"Ошибка привязки почты {email} к tg {tg_id}: {e}")
+
+    return RedirectResponse(url="/dashboard", status_code=303)
+
 @app.get("/logout")
 async def logout(request: Request):
     request.session.clear()

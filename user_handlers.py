@@ -5,7 +5,7 @@ from datetime import datetime
 from aiogram import Router, F, BaseMiddleware
 from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, TelegramObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram import html
@@ -146,7 +146,7 @@ async def check_and_clean_expired(tg_id: int):
 # --- Хендлеры ---
 
 @user_router.message(Command("start"))
-async def start_cmd(message: Message, state: FSMContext):
+async def start_cmd(message: Message, state: FSMContext, command: CommandObject):
     await state.clear() 
     
     try:
@@ -157,6 +157,22 @@ async def start_cmd(message: Message, state: FSMContext):
         )
     except Exception as e:
         print(f"Ошибка сохранения профиля: {e}")
+
+    # Deep-link со страницы входа сайта (кнопка «Войти через бота»):
+    # пользователь уже опознан по tg id, выдаем одноразовую ссылку на вход в кабинет.
+    # Работает всегда, в отличие от виджета Telegram, который часто блокируют.
+    if command.args and command.args.strip() in ("web_login", "webreg"):
+        token = db.create_tg_login_token(message.from_user.id, ttl_seconds=600)
+        site_url = (db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(text="🔓 Открыть личный кабинет", url=f"{site_url}/auth/bot?token={token}"))
+        await message.answer(
+            "🔓 <b>Вход в личный кабинет на сайте</b>\n\n"
+            "Нажмите кнопку ниже — вы сразу попадете в свой кабинет.\n"
+            "Ссылка одноразовая и действует 10 минут. Если не успели — нажмите /start еще раз.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
 
     profile = db.get_user_profile(message.from_user.id)
     if not profile or len(profile) <= 3 or profile[3] == 0:
