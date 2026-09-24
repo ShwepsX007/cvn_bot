@@ -157,7 +157,14 @@ def _send_resend(to: str, subject: str, html: str) -> tuple[bool, str]:
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            # Cloudflare перед Resend режет дефолтный Python-urllib UA (403 error 1010),
+            # поэтому выставляем обычный браузерный юзер-агент.
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        },
         method="POST",
     )
     try:
@@ -166,6 +173,11 @@ def _send_resend(to: str, subject: str, html: str) -> tuple[bool, str]:
         return True, ""
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")[:300]
+        if e.code == 403 and "1010" in body:
+            return False, (
+                "Cloudflare заблокировал запрос к Resend (код 1010) из-за репутации IP сервера. "
+                "Вариант: используйте SMTP (Яндекс/Mail.ru) - задайте SMTP-строки и mail_mode=smtp."
+            )
         return False, f"Resend HTTP {e.code}: {body}"
     except Exception as e:
         return False, f"Resend: {e}"
