@@ -41,6 +41,13 @@ if not os.path.exists(STATIC_DIR):
     os.makedirs(STATIC_DIR)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# Веб-админка (страницы /admin/web/*) - доступ только для админов
+try:
+    import web_admin
+    app.include_router(web_admin.router)
+except Exception as e:
+    print(f"⚠️ Веб-админка не подключена: {e}")
+
 # Секрет для подписи сессионных cookie (вход через Telegram). Генерируется один раз
 # и сохраняется в файл рядом со скриптом, чтобы не разлогинивать всех при каждом рестарте.
 SESSION_SECRET_FILE = os.path.join(BASE_DIR, ".session_secret")
@@ -166,6 +173,14 @@ def _current_tg_id(request: Request):
 
 def _current_email(request: Request):
     return request.session.get("email")
+
+def is_web_admin(tg_id) -> bool:
+    """Признак прав на веб-админку: главный админ из config или назначенный в базе."""
+    try:
+        tg = int(tg_id)
+    except (TypeError, ValueError):
+        return False
+    return tg == int(ADMIN_ID) or bot_db.is_admin_user(tg)
 
 def _client_host(request: Request):
     return request.headers.get("X-Real-IP") or (request.client.host if request.client else None)
@@ -576,6 +591,8 @@ async def dashboard(request: Request):
             # привязанная почта (если есть) - для карточки "Почта" в кабинете
             "bound_email": (email_acc or (None, None))[1],
             "email_has_password": bool(email_acc and email_acc[2]),
+            # кнопка перехода в админку - только для администраторов
+            "is_admin": is_web_admin(tg_id),
         }
     )
 

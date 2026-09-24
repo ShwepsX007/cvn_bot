@@ -27,7 +27,12 @@
             <h4 class="fw-bold mb-0">🔐 Личный кабинет</h4>
             <small>{{ display_name }} · ID {{ tg_id }}</small>
         </div>
-        <a href="/logout" class="btn btn-light btn-sm rounded-pill px-3">Выйти</a>
+        <div class="d-flex gap-2">
+            {% if is_admin %}
+            <a href="/admin/web" class="btn btn-warning btn-sm rounded-pill px-3">🛠 Админка</a>
+            {% endif %}
+            <a href="/logout" class="btn btn-light btn-sm rounded-pill px-3">Выйти</a>
+        </div>
     </div>
 </div>
 

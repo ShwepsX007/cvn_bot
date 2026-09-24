@@ -168,6 +168,13 @@ def init_db():
                         used INTEGER DEFAULT 0
                     )''')
 
+    # Администраторы ВЕБ-АДМИНКИ на сайте (главный админ из config.ADMIN_ID сидится отдельно)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS admins (
+                        tg_id INTEGER PRIMARY KEY,
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        added_by INTEGER
+                    )''')
+
     conn.commit()
     conn.close()
 
@@ -489,6 +496,128 @@ def consume_tg_login_token(token):
         conn.commit()
     conn.close()
     return row[0] if row else None
+
+
+# --- АДМИНИСТРАТОРЫ ВЕБ-АДМИНКИ (таблица admins) ---
+def list_admins():
+    """Ряды (tg_id, added_at, added_by)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT tg_id, added_at, added_by FROM admins ORDER BY added_at")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def is_admin_user(tg_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM admins WHERE tg_id=?", (tg_id,))
+    ok = cursor.fetchone() is not None
+    conn.close()
+    return ok
+
+def add_admin(tg_id, added_by=None):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO admins (tg_id, added_by) VALUES (?, ?)", (tg_id, added_by))
+    conn.commit()
+    conn.close()
+
+def remove_admin(tg_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM admins WHERE tg_id=?", (tg_id,))
+    conn.commit()
+    conn.close()
+
+
+# --- СВОДКИ ДЛЯ ВЕБ-АДМИНКИ ---
+def get_all_profiles():
+    """Все профили: (tg_id, full_name, username, last_active, accepted_tos, всего подписок, активных)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''SELECT p.tg_id, p.full_name, p.username, p.last_active, p.accepted_tos,
+                        (SELECT COUNT(*) FROM users u WHERE u.tg_id = p.tg_id),
+                        (SELECT COUNT(*) FROM users u WHERE u.tg_id = p.tg_id AND u.active = 1)
+                      FROM user_profiles p ORDER BY p.last_active DESC''')
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_pending_detail_requests():
+    """Заявки на реквизиты со статусом pending: (id, tg_id, server_id, period, created_at)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, tg_id, server_id, period, created_at FROM detail_requests WHERE status='pending' ORDER BY created_at"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_pending_manual_orders():
+    """Заказы по чеку со статусом pending: (id, tg_id, server_id, period, amount, created_at)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(manual_orders)")
+    cols = [c[1] for c in cursor.fetchall()]
+    conn.close()
+    created = "created_at" if "created_at" in cols else "id"
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"SELECT id, tg_id, server_id, period, amount, {created} FROM manual_orders WHERE status='pending' ORDER BY {created}"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_all_settings():
+    """Все настройки: список (key, value) в алфавитном порядке."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT key, value FROM settings ORDER BY key")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_paid_revenue():
+    """(кол-во оплаченных заказов, сумма руб.) по таблицам orders и manual_orders."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*), IFNULL(SUM(amount),0) FROM orders WHERE status='paid'")
+    c1, s1 = cursor.fetchone()
+    try:
+        cursor.execute("SELECT COUNT(*), IFNULL(SUM(amount),0) FROM manual_orders WHERE status='paid'")
+        c2, s2 = cursor.fetchone()
+    except sqlite3.OperationalError:
+        c2, s2 = (0, 0)
+    conn.close()
+    return int(c1 or 0) + int(c2 or 0), int(s1 or 0) + int(s2 or 0)
+
+def count_active_subs():
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE active=1")
+    n = cursor.fetchone()[0]
+    conn.close()
+    return int(n or 0)
+
+def get_all_servers_full():
+    """Все серверы (и неактивные): (id, ip, port, active, name, max_users, price_1d, price_7d, price_30d)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, ip, port, active, name, max_users, price_1d, price_7d, price_30d FROM servers ORDER BY id")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def set_server_active(server_id, active):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE servers SET active=? WHERE id=?", (1 if active else 0, server_id))
+    conn.commit()
+    conn.close()
 
 
 def get_expired_users():

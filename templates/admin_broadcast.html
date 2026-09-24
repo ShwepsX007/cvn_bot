@@ -1,0 +1,20 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4">
+    <h5 class="fw-bold mb-1">📢 Рассылка всем клиентам</h5>
+    <small class="text-muted d-block mb-3">
+        Сообщение уйдет в телеграм <b>{{ users_count }}</b> пользователям, которые когда-либо запускали бота.
+        Поддерживается HTML-разметка Telegram (&lt;b&gt;, &lt;i&gt;, &lt;a href&gt;).
+    </small>
+    <form method="post" action="/admin/web/broadcast" onsubmit="return confirm('Отправить рассылку {{ users_count }} пользователям?')">
+        <div class="mb-3">
+            <textarea name="text" class="form-control" rows="6" required
+                      placeholder="Текст сообщения, например: ⚠️ Внимание! 25.09 плановые работы на сервере Нидерланды с 03:00 до 04:00 МСК."></textarea>
+        </div>
+        <button type="submit" class="btn btn-warning rounded-pill px-4">🚀 Отправить рассылку</button>
+    </form>
+    <small class="text-muted d-block mt-3">Рассылка выполняется с паузами (ограничение Telegram); страница «подумает» несколько секунд — это нормально.</small>
+</div>
+
+{% endblock %}

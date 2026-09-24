@@ -1,0 +1,51 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card card-custom p-3 text-center h-100">
+            <div class="display-6 fw-bold">{{ servers_active }}<span class="fs-6 text-muted">/{{ servers_total }}</span></div>
+            <small class="text-muted">Серверов (активных)</small>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card card-custom p-3 text-center h-100">
+            <div class="display-6 fw-bold">{{ unique_users }}</div>
+            <small class="text-muted">Уникальных клиентов</small>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card card-custom p-3 text-center h-100">
+            <div class="display-6 fw-bold">{{ active_subs }}</div>
+            <small class="text-muted">Активных подписок</small>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card card-custom p-3 text-center h-100">
+            <div class="display-6 fw-bold">{{ revenue }} ₽</div>
+            <small class="text-muted">Выручка ({{ paid_count }} оплат)</small>
+        </div>
+    </div>
+</div>
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-3">📥 Ожидают действий</h5>
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="/admin/web/requests" class="btn {{ 'btn-warning' if (pend_det or pend_man) else 'btn-outline-warning' }} rounded-pill">
+            Заявок на реквизиты: {{ pend_det }} · Чеков на проверку: {{ pend_man }}
+        </a>
+    </div>
+</div>
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-3">⚙️ Текущее состояние</h5>
+    <table class="table table-sm mb-0">
+        <tbody>
+            <tr><td class="text-muted" style="width:240px">📧 Отправка писем</td><td><b>{{ mail_status }}</b></td></tr>
+            <tr><td class="text-muted">💳 Автооплата</td><td><b>{{ provider }}</b> ({{ 'включена' if auto_pay else 'выключена' }})</td></tr>
+        </tbody>
+    </table>
+    <small class="text-muted mt-2 d-block">Изменить — на странице <a href="/admin/web/settings">«Настройки»</a>.</small>
+</div>
+
+{% endblock %}

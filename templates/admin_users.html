@@ -1,0 +1,85 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-3">🎁 Выдать / продлить доступ вручную</h5>
+    <form method="post" action="/admin/web/users/grant" class="row g-2 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Telegram ID пользователя</label>
+            <input type="number" name="tg_id" class="form-control" placeholder="напр. 1617274846" required>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Сервер</label>
+            <select name="server_id" class="form-select" required>
+                {% for s in servers %}
+                <option value="{{ s[0] }}">{{ s[3] }} ({{ s[1] }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Период</label>
+            <select name="period" class="form-select">
+                <option value="30d">30 дней</option>
+                <option value="7d">7 дней</option>
+                <option value="1d">1 день</option>
+                <option value="trial">Пробный</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <button type="submit" class="btn btn-success w-100 rounded-pill">Выдать</button>
+        </div>
+    </form>
+    <small class="text-muted d-block mt-2">Конфиг генерируется и отправляется пользователю в телеграм (если чат с ботом открыт), файл также сохраняется для скачивания в кабинете.</small>
+</div>
+
+<div class="card card-custom p-4">
+    <h5 class="fw-bold mb-3">👥 Клиенты ({{ users|length }})</h5>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>ID</th><th>Имя / username</th><th>Активность</th><th>Подписки</th><th style="width:220px">Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for u in users %}
+                <tr>
+                    <td><code>{{ u.tg_id }}</code></td>
+                    <td>{{ u.name }}{% if u.username %}<br><small class="text-muted">@{{ u.username }}</small>{% endif %}</td>
+                    <td><small class="text-muted">{{ u.last_active }}</small></td>
+                    <td>
+                        {% if u.subs %}
+                            {% for s in u.subs %}
+                                <span class="badge {{ 'bg-success' if s.active else 'bg-secondary' }} rounded-pill mb-1">
+                                    {{ s.server_name }}: до {{ s.expire[:10] if s.expire else '—' }}
+                                </span><br>
+                            {% endfor %}
+                        {% else %}
+                            <small class="text-muted">нет</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% for s in u.subs if s.active %}
+                        <form method="post" action="/admin/web/users/deactivate" class="d-inline"
+                              onsubmit="return confirm('Отключить подписку {{ u.tg_id }} на сервере {{ s.server_id }}?')">
+                            <input type="hidden" name="tg_id" value="{{ u.tg_id }}">
+                            <input type="hidden" name="server_id" value="{{ s.server_id }}">
+                            <button class="btn btn-outline-warning btn-sm rounded-pill mb-1">⏸ {{ s.server_name }}</button>
+                        </form>
+                        {% endfor %}
+                        {% if u.tg_id != root_admin %}
+                        <form method="post" action="/admin/web/users/delete" class="d-inline"
+                              onsubmit="return confirm('УДАЛИТЬ пользователя {{ u.tg_id }} со всеми подписками?')">
+                            <input type="hidden" name="tg_id" value="{{ u.tg_id }}">
+                            <button class="btn btn-outline-danger btn-sm rounded-pill mb-1">🗑 Удалить</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
