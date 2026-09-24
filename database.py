@@ -52,7 +52,11 @@ def init_db():
         ('price_30d', '500'),
         ('admin_contact', '@your_telegram_username'),
         ('manual_payment_details', 'Реквизиты пока не заданы администратором.'),
-        ('site_url', 'https://amneziawg.fun')
+        ('site_url', 'https://amneziawg.fun'),
+        # Автооплата: активный провайдер (off/aipay/platega). По умолчанию выключена.
+        ('payment_provider', 'off'),
+        # ID способа оплаты Platega (в примерах их доков: 2 = СБП QR). Уточняется у менеджера.
+        ('platega_payment_method', '2')
     ]
     cursor.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", default_settings)
     

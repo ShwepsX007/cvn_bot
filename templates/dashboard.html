@@ -181,7 +181,11 @@
       <div class="modal-body" id="buyModalBody">
         <p>Сумма к оплате: <b id="buyAmount">-</b> руб.</p>
         <div class="d-grid gap-2">
+            {% if auto_pay_enabled %}
             <button class="btn btn-primary rounded-pill" onclick="chooseMethod('auto')">⚡️ Оплатить картой (авто)</button>
+            {% else %}
+            <p class="small text-muted text-center mb-0">⚡️ Автооплата картой временно недоступна</p>
+            {% endif %}
             <button class="btn btn-outline-secondary rounded-pill" onclick="chooseMethod('manual')">📥 Ручная оплата (по чеку)</button>
         </div>
         <div id="methodResult" class="mt-3"></div>

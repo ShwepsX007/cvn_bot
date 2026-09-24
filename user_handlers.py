@@ -12,7 +12,7 @@ from aiogram import html
 
 import database as db
 import ssh_manager as ssh
-import aipay
+import payments
 from config import ADMIN_ID
 
 user_router = Router()
@@ -293,14 +293,23 @@ async def buy_menu(callback: CallbackQuery):
 @user_router.callback_query(F.data.startswith("pay_req_"))
 async def ask_for_details_prompt(callback: CallbackQuery):
     _, _, s_id, period = callback.data.split("_")
-    text = (
-        "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
-        "⚡️ <b>Оплата картой (авто)</b> — доступ выдается автоматически сразу после оплаты.\n"
-        "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
-        "<i>Выберите удобный способ оплаты.</i>"
-    )
+    auto_enabled = payments.is_auto_pay_enabled()
+    if auto_enabled:
+        text = (
+            "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
+            "⚡️ <b>Оплата картой (авто)</b> — доступ выдается автоматически сразу после оплаты.\n"
+            "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
+            "<i>Выберите удобный способ оплаты.</i>"
+        )
+    else:
+        text = (
+            "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
+            "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
+            "<i>⚡️ Автоматическая оплата картой временно недоступна.</i>"
+        )
     builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="⚡️ Оплатить картой (авто)", callback_data=f"autopay_{s_id}_{period}"))
+    if auto_enabled:
+        builder.add(InlineKeyboardButton(text="⚡️ Оплатить картой (авто)", callback_data=f"autopay_{s_id}_{period}"))
     builder.add(InlineKeyboardButton(text="📥 Запрос реквизитов", callback_data=f"ask_det_{s_id}_{period}"))
     builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"buy_srv_{s_id}"))
     builder.adjust(1)
@@ -311,6 +320,12 @@ async def autopay_create(callback: CallbackQuery):
     _, s_id_str, period = callback.data.split("_")
     s_id = int(s_id_str)
     tg_id = callback.from_user.id
+
+    if not payments.is_auto_pay_enabled():
+        return await callback.answer(
+            "Автоматическая оплата временно отключена. Воспользуйтесь запросом реквизитов.",
+            show_alert=True
+        )
 
     server = db.get_server_by_id(s_id)
     if not server:
@@ -323,7 +338,9 @@ async def autopay_create(callback: CallbackQuery):
     await callback.answer("⏳ Создаю платеж...")
 
     try:
-        payment_url, uid = await aipay.create_order(amount, "RUB")
+        payment_url, uid = await payments.create_order(
+            amount, "RUB", tg_id=tg_id, username=callback.from_user.username
+        )
     except Exception as e:
         await callback.message.answer(
             f"❌ Не удалось создать автоматический платеж. Попробуйте позже или воспользуйтесь ручной оплатой.\n\n"
@@ -363,13 +380,13 @@ async def autopay_check_status(callback: CallbackQuery):
         return await callback.answer("❌ Этот платеж не был завершен (отменен или произошла ошибка).", show_alert=True)
 
     try:
-        remote_status = await aipay.get_order_status(uid)
+        remote_status = await payments.get_order_status(uid)
     except Exception:
         return await callback.answer("Не удалось проверить статус, попробуйте чуть позже.", show_alert=True)
 
     status_id = remote_status.get("id")
 
-    if status_id == aipay.STATUS_SUCCESS:
+    if status_id == payments.STATUS_SUCCESS:
         if db.complete_order_by_uid(uid):
             await callback.answer("✅ Оплата подтверждена! Выдаю доступ...", show_alert=True)
             success, msg = await issue_vpn_access(callback.bot, tg_id, s_id, period, notify_admin=True)
@@ -381,8 +398,8 @@ async def autopay_check_status(callback: CallbackQuery):
                 )
         else:
             await callback.answer("✅ Оплата уже была подтверждена ранее.", show_alert=True)
-    elif status_id in (aipay.STATUS_ERROR, aipay.STATUS_CANCELLED):
-        db.fail_order_by_uid(uid, "failed" if status_id == aipay.STATUS_ERROR else "cancelled")
+    elif status_id in (payments.STATUS_ERROR, payments.STATUS_CANCELLED):
+        db.fail_order_by_uid(uid, "failed" if status_id == payments.STATUS_ERROR else "cancelled")
         await callback.answer("❌ Платеж не завершен (ошибка или отмена).", show_alert=True)
     else:
         await callback.answer("⏳ Оплата еще не подтверждена. Попробуйте через минуту.", show_alert=True)
@@ -674,7 +691,7 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
     Уведомляет администратора о выдаче доступа - только в случаях, когда у админа иначе
     НЕТ видимости происходящего:
       - пробный период (self-service, никакого одобрения не требуется) - уведомляем ВСЕГДА;
-      - автооплата картой (AiPay) - уведомляем, если вызывающий код передал notify_admin=True
+      - автооплата картой (провайдер из payments.py) - уведомляем, если вызывающий код передал notify_admin=True
         (вебхук / поллинг статуса оплаты).
     Ручную оплату здесь не дублируем - админ и так видит это сразу же после нажатия
     "Подтвердить" в confirm_manual_order().
@@ -689,7 +706,7 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
         period_label = {"1d": "1 день", "7d": "7 дней", "30d": "30 дней"}.get(period, period)
         action_label = "Продление подписки" if renewed else "Новая оплата"
         text = (
-            f"💳 <b>{action_label} картой (AiPay)!</b>\n\n"
+            f"💳 <b>{action_label} картой (авто)!</b>\n\n"
             f"Пользователь: <code>{tg_id}</code>\n"
             f"Сервер: <b>{srv_name}</b>\n"
             f"Период: {period_label}"

@@ -17,6 +17,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import ssh_manager as ssh
 import database as bot_db
 import aipay
+import platega
+import payments
 import webauth
 
 from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, clean_inactive_users
@@ -270,6 +272,8 @@ async def dashboard(request: Request):
             "active_subs": active_subs,
             "servers": servers_info,
             "trial_hours": bot_db.get_setting("trial_hours"),
+            # кнопка автооплаты рисуется, только если провайдер включен (payments.py)
+            "auto_pay_enabled": payments.is_auto_pay_enabled(),
         }
     )
 
@@ -328,8 +332,12 @@ async def web_create_order(request: Request):
         raise HTTPException(status_code=400, detail="Не удалось определить цену тарифа")
 
     if method == "auto":
+        if not payments.is_auto_pay_enabled():
+            raise HTTPException(status_code=503, detail="Автоматическая оплата временно недоступна. Воспользуйтесь ручной оплатой.")
         try:
-            payment_url, uid = await aipay.create_order(amount, "RUB")
+            payment_url, uid = await payments.create_order(
+                amount, "RUB", tg_id=tg_id, client_ip=request.headers.get("X-Real-IP")
+            )
         except Exception as e:
             raise HTTPException(status_code=502, detail=str(e))
         bot_db.create_aipay_order(tg_id, server_id, period, amount, uid)
@@ -445,19 +453,19 @@ async def web_check_aipay(request: Request, uid: str):
         return {"status": status}
 
     try:
-        remote_status = await aipay.get_order_status(uid)
+        remote_status = await payments.get_order_status(uid)
     except Exception:
         return {"status": "pending"}
 
     status_id = remote_status.get("id")
-    if status_id == aipay.STATUS_SUCCESS:
+    if status_id == payments.STATUS_SUCCESS:
         if bot_db.complete_order_by_uid(uid):
             success, msg = await issue_vpn_access(bot, order_tg_id, s_id, period, notify_admin=True)
             if not success:
                 return {"status": "error", "detail": msg}
         return {"status": "paid"}
-    elif status_id in (aipay.STATUS_ERROR, aipay.STATUS_CANCELLED):
-        bot_db.fail_order_by_uid(uid, "failed" if status_id == aipay.STATUS_ERROR else "cancelled")
+    elif status_id in (payments.STATUS_ERROR, payments.STATUS_CANCELLED):
+        bot_db.fail_order_by_uid(uid, "failed" if status_id == payments.STATUS_ERROR else "cancelled")
         return {"status": "failed"}
     return {"status": "pending"}
 
@@ -599,6 +607,60 @@ async def aipay_webhook(request: Request):
                     pass
     elif status_id in (aipay.STATUS_ERROR, aipay.STATUS_CANCELLED):
         bot_db.fail_order_by_uid(uid, "failed" if status_id == aipay.STATUS_ERROR else "cancelled")
+        try:
+            await bot.send_message(
+                tg_id,
+                "❌ Оплата не была завершена (отменена или произошла ошибка). "
+                "Попробуйте снова или воспользуйтесь ручной оплатой."
+            )
+        except Exception:
+            pass
+
+    return {"ok": True}
+
+@app.post("/webhook/platega")
+async def platega_webhook(request: Request):
+    """
+    Callback от Platega о смене статуса транзакции.
+    Этот URL нужно один раз указать в личном кабинете Platega (my.platega.io -> Настройки -> Callback URLs),
+    например: https://amneziawg.fun/webhook/platega (только HTTPS с валидным сертификатом).
+    Аутентификация - по заголовкам X-MerchantId и X-Secret (проверяются внутри).
+    """
+    if not platega.verify_webhook_headers(request.headers):
+        raise HTTPException(status_code=403, detail="Invalid credentials")
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    uid = data.get("id")
+    raw_status = (data.get("status") or "").upper()
+    if not uid:
+        raise HTTPException(status_code=400, detail="Missing id")
+
+    order = bot_db.get_order_by_uid(uid)
+    if not order:
+        # Не наш заказ - отвечаем 200, чтобы Platega не повторяла callback
+        return {"ok": True}
+
+    order_id, tg_id, s_id, period, amount, order_status = order
+
+    if raw_status == "CONFIRMED":
+        if bot_db.complete_order_by_uid(uid):
+            success, msg = await issue_vpn_access(bot, tg_id, s_id, period, notify_admin=True)
+            if not success:
+                try:
+                    await bot.send_message(
+                        ADMIN_ID,
+                        f"⚠️ Platega: оплата <code>{uid}</code> подтверждена, но выдача доступа пользователю "
+                        f"<code>{tg_id}</code> завершилась ошибкой:\n{msg}",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+    elif raw_status in ("CANCELED", "CHARGEBACKED"):
+        bot_db.fail_order_by_uid(uid, "cancelled" if raw_status == "CANCELED" else "failed")
         try:
             await bot.send_message(
                 tg_id,
