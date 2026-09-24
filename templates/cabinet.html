@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Личный кабинет VPN</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .card-vpn { border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>👤 Личный кабинет (ID: {{ tg_id }})</h2>
+                    <a href="/" class="btn btn-outline-secondary btn-sm">На главную</a>
+                </div>
+
+                <h4 class="mb-3">Ваши активные подписки:</h4>
+                
+                {% if subs %}
+                    {% for sub in subs %}
+                    <div class="card card-vpn mb-3 p-4 bg-white">
+                        <div class="row align-items-center">
+                            <div class="col-sm-8">
+                                <h5 class="text-primary">🌍 Локация: {{ sub.server_name }}</h5>
+                                <p class="mb-1 text-muted">Имя пользователя: <code>{{ sub.username }}</code></p>
+                                <p class="mb-0 text-muted">⏳ Активен до: <b>{{ sub.expire }}</b></p>
+                            </div>
+                            <div class="col-sm-4 text-sm-end mt-3 mt-sm-0">
+                                <a href="/download/{{ tg_id }}/{{ sub.server_id }}" class="btn btn-success w-100">
+                                    📥 Скачать .conf
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="alert alert-warning">
+                        У вас пока нет активных подписок на этом аккаунте. Вы можете оформить их через нашего Telegram-бота!
+                    </div>
+                {% endif %}
+                
+                <div class="card p-4 mt-4 bg-light text-center card-vpn">
+                    <h5>📚 Нужна помощь в настройке?</h5>
+                    <p class="text-muted mb-0">Установите приложение <b>AmneziaWG</b> на устройство, скачайте файл конфигурации выше и импортируйте его в приложение.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

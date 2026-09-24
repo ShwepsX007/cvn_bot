@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Личный кабинет — AmneziaWG VPN</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f7f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .topbar { background: linear-gradient(135deg, #0d6efd, #0dcaf0); color: #fff; padding: 22px 0; border-radius: 0 0 28px 28px; margin-bottom: 30px; }
+        .card-custom { border: none; border-radius: 18px; box-shadow: 0 5px 20px rgba(0,0,0,0.05); }
+        .sub-card { border-left: 4px solid #198754; }
+        .price-btn { min-width: 150px; }
+        .badge-trial { background: #ffc107; color: #333; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="container d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h4 class="fw-bold mb-0">🔐 Личный кабинет</h4>
+            <small>{{ display_name }} · ID {{ tg_id }}</small>
+        </div>
+        <a href="/logout" class="btn btn-light btn-sm rounded-pill px-3">Выйти</a>
+    </div>
+</div>
+
+<div class="container pb-5">
+
+{% if not accepted_tos %}
+    <!-- ===================== ЭКРАН ПРИНЯТИЯ СОГЛАШЕНИЯ ===================== -->
+    <div class="card card-custom p-4 p-md-5 mb-4">
+        <h4 class="fw-bold mb-3">📜 Пользовательское соглашение и Политика конфиденциальности</h4>
+        <div class="mb-3">
+            <b>1. Общие положения</b><br>
+            Используя данный сервис, вы принимаете условия предоставления услуг VPN. Сервис предоставляется «как есть» без гарантий абсолютной бесперебойности.
+        </div>
+        <div class="mb-3">
+            <b>2. Политика конфиденциальности</b><br>
+            • Сервис собирает только базовую информацию из вашего профиля Telegram (ID, имя и username) для привязки и управления подпиской.<br>
+            • Мы не ведем логи вашего трафика, не отслеживаем посещаемые ресурсы и не перехватываем скачиваемые файлы.<br>
+            • Ваш IP-адрес используется протоколом WireGuard исключительно для поддержания активного соединения с сервером.
+        </div>
+        <div class="mb-4">
+            <b>3. Правила использования</b><br>
+            • Строго запрещается использование сервиса для любой незаконной деятельности (спам, кардинг, DDoS-атаки, мошенничество и т.д.).<br>
+            • При поступлении официальных жалоб (Abuse) на вашу активность, мы оставляем за собой право заблокировать учетную запись без возврата средств.
+        </div>
+        <form method="post" action="/web/accept_tos">
+            <button type="submit" class="btn btn-primary btn-lg rounded-pill px-5">✅ Принять соглашение и продолжить</button>
+        </form>
+    </div>
+
+{% else %}
+
+    <div id="alert-area"></div>
+
+    <!-- ===================== МОИ ПОДПИСКИ ===================== -->
+    <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold mb-3">👤 Мои подписки</h5>
+        {% if active_subs %}
+            {% for sub in active_subs %}
+            <div class="card sub-card mb-2 p-3" id="sub-card-{{ sub.server_id }}">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <b>{{ sub.server_name }}</b>
+                        {% if sub.is_trial %}<span class="badge badge-trial ms-1">Пробный</span>{% endif %}
+                        <br>
+                        <small class="text-muted">Активно до: {{ sub.expire }}</small>
+                    </div>
+                    {% if sub.has_config %}
+                        <a href="/download/{{ sub.server_id }}" class="btn btn-outline-success btn-sm rounded-pill">⬇️ Скачать конфиг</a>
+                    {% else %}
+                        <button class="btn btn-outline-warning btn-sm rounded-pill" onclick="reissueConfig({{ sub.server_id }})">🔄 Обновить конфиг</button>
+                    {% endif %}
+                </div>
+                {% if not sub.has_config %}
+                <div class="small text-muted mt-2">
+                    Этот доступ оформлен до обновления сайта, поэтому файл пока не сохранен здесь для скачивания.
+                    Нажмите «Обновить конфиг», чтобы получить новый файл (если старый уже используется на устройстве - он перестанет работать, скачайте новый взамен).
+                </div>
+                <div id="reissue-result-{{ sub.server_id }}" class="small mt-1"></div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-muted mb-0">У вас пока нет активных подписок. Оформите ниже 👇</p>
+        {% endif %}
+    </div>
+
+    <!-- ===================== КУПИТЬ / ПРОДЛИТЬ ===================== -->
+    <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold mb-3">🛍 Купить / продлить VPN</h5>
+        {% if servers %}
+            {% for srv in servers %}
+            <div class="border rounded-4 p-3 mb-3">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <b>🌍 {{ srv.name }}</b>
+                    <small class="text-muted">Свободно мест: {{ srv.free_slots }}</small>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    {% if srv.can_trial %}
+                    <button class="btn btn-warning price-btn rounded-pill fw-bold" onclick="orderTrial({{ srv.id }})">🎁 Тест ({{ trial_hours }}ч) — бесплатно</button>
+                    {% endif %}
+                    <button class="btn btn-outline-primary price-btn rounded-pill" onclick="openBuyModal({{ srv.id }}, '1d', {{ srv.price_1d }})">⏳ 1 день — {{ srv.price_1d }} руб.</button>
+                    <button class="btn btn-outline-primary price-btn rounded-pill" onclick="openBuyModal({{ srv.id }}, '7d', {{ srv.price_7d }})">⏳ 7 дней — {{ srv.price_7d }} руб.</button>
+                    <button class="btn btn-outline-primary price-btn rounded-pill" onclick="openBuyModal({{ srv.id }}, '30d', {{ srv.price_30d }})">⏳ 30 дней — {{ srv.price_30d }} руб.</button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-muted mb-0">Сейчас нет доступных серверов. Загляните позже.</p>
+        {% endif %}
+    </div>
+
+    <!-- ===================== ИНСТРУКЦИЯ / ОПИСАНИЕ / ПОДДЕРЖКА ===================== -->
+    <div class="accordion mb-4" id="infoAccordion">
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accHelp">📚 Инструкция по настройке</button>
+            </h2>
+            <div id="accHelp" class="accordion-collapse collapse" data-bs-parent="#infoAccordion">
+                <div class="accordion-body">
+                    <ol>
+                        <li>Скачайте приложение AmneziaWG:
+                            <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" target="_blank">Android</a> ·
+                            <a href="https://apps.apple.com/us/app/amneziawg/id6478942365" target="_blank">iOS</a> ·
+                            <a href="https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1" target="_blank">Windows</a>
+                        </li>
+                        <li>Скачайте файл конфигурации <code>.conf</code> из раздела «Мои подписки» выше.</li>
+                        <li>Откройте приложение AmneziaWG, нажмите «Добавить туннель» (➕) и выберите скачанный файл.</li>
+                        <li>Включите переключатель. Готово — вы в безопасном интернете!</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accDesc">ℹ️ Описание услуг и условия</button>
+            </h2>
+            <div id="accDesc" class="accordion-collapse collapse" data-bs-parent="#infoAccordion">
+                <div class="accordion-body">
+                    <p><b>Эксклюзивное качество и скорость:</b> на каждом сервере не более 20 человек — это гарантирует стабильно высокую скорость и минимальный пинг.</p>
+                    <p><b>Как это работает:</b> вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и сервис моментально выдает конфигурационный файл.</p>
+                    <p><b>Поддерживаемые платформы:</b> Android, iOS, Windows — протокол AmneziaWG с защитой от блокировок.</p>
+                    <p><b>Выделенный личный сервер:</b> для заказа обратитесь в поддержку ниже.</p>
+                </div>
+            </div>
+        </div>
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#accSupport">🤝 Поддержка</button>
+            </h2>
+            <div id="accSupport" class="accordion-collapse collapse" data-bs-parent="#infoAccordion">
+                <div class="accordion-body">
+                    <p class="text-muted small">Опишите проблему — сообщение придет администратору в Telegram.</p>
+                    <textarea id="supportText" class="form-control mb-2" rows="3" placeholder="Опишите вашу проблему..."></textarea>
+                    <button class="btn btn-primary rounded-pill" onclick="sendSupport()">Отправить</button>
+                    <div id="supportResult" class="small mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+{% endif %}
+</div>
+
+<!-- ===================== МОДАЛЬНОЕ ОКНО ОПЛАТЫ ===================== -->
+<div class="modal fade" id="buyModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content rounded-4">
+      <div class="modal-header border-0">
+        <h5 class="modal-title fw-bold">💳 Оплата тарифа</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="buyModalBody">
+        <p>Сумма к оплате: <b id="buyAmount">-</b> руб.</p>
+        <div class="d-grid gap-2">
+            <button class="btn btn-primary rounded-pill" onclick="chooseMethod('auto')">⚡️ Оплатить картой (авто)</button>
+            <button class="btn btn-outline-secondary rounded-pill" onclick="chooseMethod('manual')">📥 Ручная оплата (по чеку)</button>
+        </div>
+        <div id="methodResult" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let buyModal, currentServerId, currentPeriod, currentAmount, pollTimer;
+
+document.addEventListener("DOMContentLoaded", function() {
+    buyModal = new bootstrap.Modal(document.getElementById('buyModal'));
+});
+
+function showAlert(html, type) {
+    document.getElementById('alert-area').innerHTML =
+        `<div class="alert alert-${type} rounded-3">${html}</div>`;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str == null ? '' : String(str);
+    return div.innerHTML;
+}
+
+async function reissueConfig(serverId) {
+    const resultDiv = document.getElementById(`reissue-result-${serverId}`);
+    const confirmed = confirm(
+        'Если у вас уже установлен и работает старый файл конфигурации на этом сервере, ' +
+        'после обновления он перестанет работать. Вам нужно будет скачать новый файл и заменить ' +
+        'им старый в приложении AmneziaWG.\n\nПродолжить?'
+    );
+    if (!confirmed) return;
+
+    resultDiv.innerHTML = '⏳ Генерируем новый конфиг...';
+    try {
+        const res = await fetch('/web/reissue', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({server_id: serverId})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        resultDiv.innerHTML = '<span class="text-success">✅ Готово! Обновляем страницу...</span>';
+        setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+        resultDiv.innerHTML = `<span class="text-danger">❌ ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+async function orderTrial(serverId) {
+    try {
+        const res = await fetch('/web/order', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({server_id: serverId, period: 'trial', method: 'trial'})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        showAlert('✅ Пробный доступ выдан! Обновляем страницу...', 'success');
+        setTimeout(() => location.reload(), 1500);
+    } catch (e) {
+        showAlert('❌ ' + escapeHtml(e.message), 'danger');
+    }
+}
+
+function openBuyModal(serverId, period, amount) {
+    currentServerId = serverId; currentPeriod = period; currentAmount = amount;
+    document.getElementById('buyAmount').innerText = amount;
+    document.getElementById('methodResult').innerHTML = '';
+    if (pollTimer) clearInterval(pollTimer);
+    buyModal.show();
+}
+
+async function chooseMethod(method) {
+    const resultDiv = document.getElementById('methodResult');
+    resultDiv.innerHTML = '⏳ Обработка...';
+    try {
+        const res = await fetch('/web/order', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({server_id: currentServerId, period: currentPeriod, method: method})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+
+        if (method === 'auto') {
+            resultDiv.innerHTML = `
+                <a href="${data.payment_url}" target="_blank" class="btn btn-success w-100 rounded-pill mb-2">💳 Перейти к оплате</a>
+                <p class="small text-muted text-center mb-0">Ожидаем подтверждение оплаты...</p>`;
+            pollTimer = setInterval(() => pollAipay(data.uid), 4000);
+        } else if (method === 'manual') {
+            // Реквизиты не показываем сразу - ждем одобрения администратора (как в боте)
+            resultDiv.innerHTML = `<p class="small text-muted">⏳ Запрос отправлен администратору. Ожидаем одобрения...</p>`;
+            pollTimer = setInterval(() => pollDetailsRequest(data.request_id), 4000);
+        }
+    } catch (e) {
+        resultDiv.innerHTML = `<div class="alert alert-danger small">${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function pollDetailsRequest(requestId) {
+    const resultDiv = document.getElementById('methodResult');
+    try {
+        const res = await fetch(`/web/check_details/${requestId}`);
+        const data = await res.json();
+        if (data.status === 'approved') {
+            clearInterval(pollTimer);
+            resultDiv.innerHTML = `
+                <p class="small">✅ Одобрено! Реквизиты для перевода:</p>
+                <pre class="bg-light p-2 rounded small">${escapeHtml(data.manual_details)}</pre>
+                <p class="small">После оплаты прикрепите скриншот/фото чека:</p>
+                <input type="file" id="receiptFile" accept="image/*" class="form-control mb-2">
+                <button class="btn btn-primary w-100 rounded-pill" onclick="submitReceipt()">📎 Отправить чек</button>`;
+        } else if (data.status === 'rejected') {
+            clearInterval(pollTimer);
+            resultDiv.innerHTML = '<div class="alert alert-danger small">❌ Администратор отклонил запрос на реквизиты.</div>';
+        }
+        // status === 'pending' - продолжаем ждать
+    } catch (e) { /* тихо игнорируем сетевые сбои опроса */ }
+}
+
+async function submitReceipt() {
+    const fileInput = document.getElementById('receiptFile');
+    const resultDiv = document.getElementById('methodResult');
+    if (!fileInput.files.length) {
+        resultDiv.innerHTML += '<div class="alert alert-warning small mt-2">Выберите файл чека.</div>';
+        return;
+    }
+    const formData = new FormData();
+    formData.append('server_id', currentServerId);
+    formData.append('period', currentPeriod);
+    formData.append('file', fileInput.files[0]);
+
+    resultDiv.innerHTML = '⏳ Отправляем чек администратору...';
+    try {
+        const res = await fetch('/web/receipt', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        resultDiv.innerHTML = '<p class="small text-muted">✅ Чек отправлен администратору. Ожидайте подтверждения (обычно занимает от нескольких минут до пары часов)...</p>';
+        pollTimer = setInterval(() => pollManual(data.order_id), 6000);
+    } catch (e) {
+        resultDiv.innerHTML = `<div class="alert alert-danger small">${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function pollAipay(uid) {
+    try {
+        const res = await fetch(`/web/check_aipay/${uid}`);
+        const data = await res.json();
+        if (data.status === 'paid') {
+            clearInterval(pollTimer);
+            buyModal.hide();
+            showAlert('✅ Оплата подтверждена! Доступ выдан.', 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else if (data.status === 'failed' || data.status === 'cancelled') {
+            clearInterval(pollTimer);
+            document.getElementById('methodResult').innerHTML += '<div class="alert alert-danger small mt-2">Платеж не завершен (ошибка или отмена).</div>';
+        }
+    } catch (e) { /* тихо игнорируем сетевые сбои опроса */ }
+}
+
+async function pollManual(orderId) {
+    try {
+        const res = await fetch(`/web/check_manual/${orderId}`);
+        const data = await res.json();
+        if (data.status === 'paid') {
+            clearInterval(pollTimer);
+            buyModal.hide();
+            showAlert('✅ Платеж подтвержден администратором! Доступ выдан.', 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else if (data.status === 'declined') {
+            clearInterval(pollTimer);
+            document.getElementById('methodResult').innerHTML += '<div class="alert alert-danger small mt-2">Платеж отклонен администратором.</div>';
+        }
+    } catch (e) { /* тихо игнорируем сетевые сбои опроса */ }
+}
+
+async function sendSupport() {
+    const text = document.getElementById('supportText').value.trim();
+    const resDiv = document.getElementById('supportResult');
+    if (!text) { resDiv.innerHTML = '<span class="text-danger">Введите текст сообщения.</span>'; return; }
+    resDiv.innerHTML = '⏳ Отправка...';
+    try {
+        const res = await fetch('/web/support', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: text})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        resDiv.innerHTML = '<span class="text-success">✅ Сообщение отправлено администратору!</span>';
+        document.getElementById('supportText').value = '';
+    } catch (e) {
+        resDiv.innerHTML = `<span class="text-danger">❌ ${escapeHtml(e.message)}</span>`;
+    }
+}
+</script>
+</body>
+</html>

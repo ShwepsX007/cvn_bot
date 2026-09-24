@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AmneziaWG VPN - Свободный интернет</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { 
+            background-color: #f4f7f6; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .hero-section { 
+            background: linear-gradient(135deg, #0d6efd, #0dcaf0); 
+            color: white; 
+            padding: 80px 0; 
+            border-radius: 0 0 40px 40px; 
+            margin-bottom: 50px; 
+            box-shadow: 0 10px 30px rgba(13, 110, 253, 0.2); 
+        }
+        .card-custom { 
+            border: none;
+            border-radius: 20px; 
+            box-shadow: 0 5px 20px rgba(0,0,0,0.05); 
+            transition: transform 0.2s, box-shadow 0.2s; 
+        }
+        .card-custom:hover { 
+            transform: translateY(-5px); 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .app-icon { font-size: 2.5rem; margin-bottom: 15px; }
+        .server-badge { font-size: 0.9rem; padding: 8px 12px; }
+    </style>
+</head>
+<body>
+
+    <!-- Главный блок -->
+    <div class="hero-section text-center">
+        <div class="container">
+            <h1 class="display-4 fw-bold mb-3">Твой личный VPN</h1>
+            <p class="lead mb-4">Надежный обход блокировок с протоколом AmneziaWG. Высокая скорость, никакой рекламы и полная анонимность.</p>
+            
+            <div class="d-flex justify-content-center gap-3 flex-wrap">
+                <button class="btn btn-warning btn-lg px-4 fw-bold rounded-pill text-dark shadow-sm" onclick="openTrialModal()">
+                    ⚡ VPN на 1 час Скачать.conf
+                </button>
+                <a href="https://t.me/AWGvpn_bot" class="btn btn-light btn-lg px-4 fw-bold text-primary rounded-pill shadow-sm">
+                    🤖 Перейти в Telegram-бот
+                </a>
+                <a href="/login" class="btn btn-outline-light btn-lg px-4 fw-bold rounded-pill">
+                    🔐 Личный кабинет
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно с капчей -->
+    <div class="modal fade" id="trialModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0 shadow">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title fw-bold">Временный доступ AmneziaWG</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body py-4">
+                    <p class="text-muted small">Этот конфиг активен ровно 1 час. Он нужен исключительно для того, чтобы вы могли запустить VPN для полноценного подключения. Не забудьте скачать приложение для подключения.</p>
+                    <p class="text-danger small fw-bold">⚠️ Доступно только 1 раз в 12 часов для одного IP-адреса.</p>
+                    <hr>
+                    <div class="mb-3 text-center">
+                        <label class="form-label fw-bold mb-2">Подтвердите, что вы не робот:</label>
+                        <h3 class="text-primary fw-bold mb-3" id="captcha-question">Загрузка...</h3>
+                        <input type="hidden" id="captcha-id">
+                        <input type="number" class="form-control form-control-lg text-center rounded-pill" id="captcha-answer" placeholder="Введите ответ (только цифры)">
+                    </div>
+                    <div id="trial-error" class="alert alert-danger d-none rounded-3 py-2 text-center small"></div>
+                </div>
+                <div class="modal-footer border-0 pt-0 justify-content-center">
+                    <button type="button" class="btn btn-primary rounded-pill px-5 fw-bold btn-lg w-100" onclick="requestTrialConfig()">Скачать TWG.conf</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container pb-5">
+        <!-- Ссылки на приложения -->
+        <h3 class="text-center fw-bold mb-4">Скачать приложение AmneziaWG</h3>
+        <div class="row text-center mb-5 justify-content-center g-4">
+            <div class="col-md-4">
+                <div class="card card-custom p-4 h-100 bg-white">
+                    <div class="app-icon">📱</div>
+                    <h5 class="fw-bold">Android</h5>
+                    <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" class="btn btn-outline-primary mt-auto rounded-pill" target="_blank">Google Play</a>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-custom p-4 h-100 bg-white">
+                    <div class="app-icon">🍏</div>
+                    <h5 class="fw-bold">iOS</h5>
+                    <a href="https://apps.apple.com/us/app/amneziawg/id6478942365" class="btn btn-outline-primary mt-auto rounded-pill" target="_blank">App Store</a>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-custom p-4 h-100 bg-white">
+                    <div class="app-icon">💻</div>
+                    <h5 class="fw-bold">Windows</h5>
+                    <a href="https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1" class="btn btn-outline-primary mt-auto rounded-pill" target="_blank">Скачать .exe</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Статус серверов -->
+        <h3 class="text-center fw-bold mb-4">🌍 Статус наших серверов</h3>
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                {% if servers %}
+                    {% for server in servers %}
+                    <div class="card card-custom mb-3 p-4 bg-white border-start border-success border-4">
+                        <div class="row align-items-center">
+                            <div class="col-sm-8">
+                                <h5 class="fw-bold mb-1">{{ server.name }}</h5>
+                                <p class="mb-0 text-muted small">Доступно мест: <b>{{ server.free_slots }}</b></p>
+                            </div>
+                            <div class="col-sm-4 text-sm-end mt-3 mt-sm-0">
+                                {% if server.free_slots > 0 %}
+                                    <span class="badge bg-success bg-opacity-10 text-success server-badge rounded-pill border border-success">Онлайн</span>
+                                {% else %}
+                                    <span class="badge bg-danger bg-opacity-10 text-danger server-badge rounded-pill border border-danger">Мест нет</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="alert alert-warning text-center rounded-3 shadow-sm">Нет доступных серверов.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Баннер Amnezia Premium (партнерская ссылка) -->
+        <div class="row justify-content-center mt-4">
+            <div class="col-lg-8">
+                <a href="https://amnezia.org/premium?arf=6VBU1RPKQZ2GYY9J" target="_blank" rel="noopener sponsored" class="d-block card-custom overflow-hidden">
+                    <img src="/static/amnezia_premium_banner.png" alt="Amnezia Premium" class="img-fluid w-100" style="display:block;">
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let myModal;
+
+        document.addEventListener("DOMContentLoaded", function() {
+            myModal = new bootstrap.Modal(document.getElementById('trialModal'));
+        });
+
+        async function openTrialModal() {
+            document.getElementById('trial-error').classList.add('d-none');
+            document.getElementById('captcha-answer').value = '';
+            await loadCaptcha();
+            myModal.show();
+        }
+
+        async function loadCaptcha() {
+            try {
+                const res = await fetch('/api/captcha');
+                const data = await res.json();
+                document.getElementById('captcha-question').innerText = data.question;
+                document.getElementById('captcha-id').value = data.captcha_id;
+            } catch (err) {
+                document.getElementById('captcha-question').innerText = "Ошибка загрузки капчи";
+            }
+        }
+
+        // --- ИСПРАВЛЕННАЯ НАДЁЖНАЯ ФУНКЦИЯ СКАЧИВАНИЯ ---
+        async function requestTrialConfig() {
+            const captchaId = document.getElementById('captcha-id').value;
+            const answer = document.getElementById('captcha-answer').value;
+            const errorDiv = document.getElementById('trial-error');
+            
+            errorDiv.classList.add('d-none');
+
+            if (!answer) {
+                errorDiv.innerText = "Пожалуйста, введите ответ.";
+                errorDiv.classList.remove('d-none');
+                return;
+            }
+
+            const btn = document.querySelector('#trialModal .btn-primary');
+            const originalText = btn.innerText;
+            btn.innerText = "Генерация конфига...";
+            btn.disabled = true;
+
+            try {
+                // Шаг 1: Запрашиваем временный токен
+                const response = await fetch('/api/get-trial-token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ captcha_id: captchaId, answer: answer })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.detail || "Произошла ошибка");
+                }
+
+                const data = await response.json();
+                const token = data.token;
+                
+                // Шаг 2: Нативный переход для скачивания (БЕЗОПАСНО ДЛЯ iOS И ANDROID)
+                window.location.href = `/api/download-trial?token=${token}`;
+                
+                myModal.hide();
+
+            } catch (error) {
+                errorDiv.innerText = error.message;
+                errorDiv.classList.remove('d-none');
+                await loadCaptcha();
+                document.getElementById('captcha-answer').value = '';
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
