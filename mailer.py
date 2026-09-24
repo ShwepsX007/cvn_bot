@@ -127,7 +127,15 @@ def send_email(to: str, subject: str, html: str) -> tuple[bool, str]:
     """Блокирующая отправка (вызывать через asyncio.to_thread). Возвращает (ok, error)."""
     mode = mail_mode()
     if mode == "off":
-        return False, "Почта не настроена (mail_mode=off и не заданы ни SMTP, ни Resend-ключ задайте в /admin)"
+        raw_mode = db.get_setting("mail_mode")
+        has_key = bool(db.get_setting("mail_resend_key"))
+        has_host = bool(db.get_setting("mail_smtp_host"))
+        return False, (
+            f"Почта выключена настройкой. Диагностика базы: mail_mode={raw_mode!r} "
+            f"(надо: auto), Resend-ключ: {'задан ✓' if has_key else 'НЕ ЗАДАН ✗'}, "
+            f"SMTP-хост: {'задан' if has_host else 'не задан'}. "
+            f"В таблице настроек найдите строку «Тип отправки почты (mail_mode)» и впишите: auto"
+        )
 
     if mode == "resend":
         return _send_resend(to, subject, html)

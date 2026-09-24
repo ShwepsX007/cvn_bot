@@ -8,6 +8,13 @@
         Секретные поля (пароли, ключи) не отображаются — введите новое значение, чтобы заменить; пустое поле = «не менять».
     </small>
 
+    {% if mail_status == 'не настроена' %}
+    <div class="alert alert-warning rounded-3 small">
+        ⚠️ Почта выключена. Проверьте в таблице ниже: строка <b>«Тип отправки почты (mail_mode)»</b> должна быть <code>auto</code>
+        (если там <code>off</code> — впишите <code>auto</code> и сохраните), и должен быть задан либо Resend-ключ, либо SMTP.
+    </div>
+    {% endif %}
+
     <div class="table-responsive">
         <table class="table table-sm align-middle">
             <thead><tr><th style="width:280px">Параметр</th><th>Значение</th><th style="width:110px"></th></tr></thead>
