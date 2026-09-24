@@ -1,0 +1,6 @@
+# секреты - на сервере создаётся из config_tokens.example.py
+config_tokens.py
+# локальные данные
+*.sqlite
+*.db
+__pycache__/

@@ -108,7 +108,13 @@ async def startup_event():
         me = await bot.get_me()
         BOT_USERNAME = me.username
     except Exception as e:
-        print(f"⚠️ Не удалось получить username бота (нужен для входа через Telegram): {e}")
+        err = str(e)
+        if "Unauthorized" in err:
+            print("⛔⛔⛔ BOT_TOKEN ОТКЛОНЕН TELEGRAM (Unauthorized). Бот не будет отвечать, вход на сайте не заработает.")
+            print("⛔ Скорее всего токен утек в публичный репозиторий и был отозван. Получите НОВЫЙ у @BotFather (/revoke),")
+            print("⛔ вставьте его в config_tokens.py на сервере и перезапустите: systemctl restart vpn_bot")
+        else:
+            print(f"⚠️ Не удалось получить username бота (нужен для входа через Telegram): {e}")
 
     scheduler.add_job(check_expiring_soon, 'interval', minutes=15)
     scheduler.add_job(check_expiring_1d, 'interval', minutes=30)

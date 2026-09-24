@@ -1,4 +1,5 @@
 import asyncio
+import os
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -8,9 +9,24 @@ import ssh_manager as ssh
 from admin_panel import admin_router, ADMIN_ID
 from user_handlers import user_router
 
-BOT_TOKEN = "8714713208:AAFndBtdC4ELxE_xMluyxANfGvq9b9tTH1M"
+# ВАЖНО: токен бота НЕ храним в git-репозитории - Telegram автоматически
+# отзывает токены, найденные в публичных репозиториях (так однажды уже случалось
+# и бот отвечал "Unauthorized"). Порядок чтения:
+#   1) переменная окружения BOT_TOKEN (например, Environment= в systemd unit);
+#   2) файл config_tokens.py рядом (есть config_tokens.example.py; сам файл в .gitignore).
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+if not BOT_TOKEN:
+    try:
+        from config_tokens import BOT_TOKEN as _LOCAL_TOKEN
+        BOT_TOKEN = (_LOCAL_TOKEN or "").strip()
+    except ImportError:
+        BOT_TOKEN = ""
 
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+if not BOT_TOKEN:
+    print("⛔ BOT_TOKEN не задан: создайте config_tokens.py (см. config_tokens.example.py) "
+          "или переменную окружения BOT_TOKEN, иначе бот не запустится.")
+
+bot = Bot(token=BOT_TOKEN or "0:placeholder", default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp = Dispatcher()
 dp.include_router(admin_router)
 dp.include_router(user_router)
