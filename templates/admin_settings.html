@@ -40,4 +40,21 @@
     </div>
 </div>
 
+<div class="card card-custom p-4 mt-4">
+    <h5 class="fw-bold mb-3">📬 Проверка доставки почты</h5>
+    <form method="post" action="/admin/web/mailtest" class="row g-2 align-items-end">
+        <div class="col-md-5">
+            <label class="form-label small text-muted">Куда отправить тестовое письмо</label>
+            <input type="email" name="to" class="form-control" placeholder="vashmail@gmail.com" required>
+        </div>
+        <div class="col-md-3">
+            <button type="submit" class="btn btn-outline-primary w-100 rounded-pill">Отправить тест</button>
+        </div>
+    </form>
+    <small class="text-muted d-block mt-2">
+        Если сервис «принял» письмо, а его нет во входящих — смотрите папку <b>СПАМ</b> и лог отправок
+        в Resend (Emails → Logs): там видно, было ли письмо доставлено или отклонено (bounce).
+    </small>
+</div>
+
 {% endblock %}

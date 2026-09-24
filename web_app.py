@@ -336,6 +336,7 @@ async def register_email(request: Request):
     ok, _err = await asyncio.to_thread(
         mailer.send_token_mail, "verify", email, token
     )
+    print(f"MAIL register verify -> {email}: ok={ok} err={_err}")
     if not ok:
         return RedirectResponse(url="/login?tab=email&error=" + quote("Не удалось отправить письмо. Попробуйте позже или войдите через Telegram."), status_code=303)
     return RedirectResponse(url="/login?tab=email&msg=" + quote("Письмо с подтверждением отправлено на " + email + ". Перейдите по ссылке из письма."), status_code=303)
@@ -359,9 +360,10 @@ async def login_email(request: Request):
     if not acc[4]:
         # Неподтвержденная почта - шлем письмо еще раз
         token = bot_db.create_email_token(email, "verify", acc[3], 24 * 3600)
-        await asyncio.to_thread(
+        ok, err = await asyncio.to_thread(
             mailer.send_token_mail, "verify", email, token
         )
+        print(f"MAIL login resend-verify -> {email}: ok={ok} err={err}")
         return RedirectResponse(url="/login?tab=email&error=" + quote("Почта не подтверждена. Мы отправили письмо повторно - перейдите по ссылке из него."), status_code=303)
 
     request.session["email"] = email
@@ -412,9 +414,10 @@ async def forgot_post(request: Request):
         acc = bot_db.get_email_account(email) if email else None
         if acc and acc[2]:
             token = bot_db.create_email_token(email, "reset", acc[3], 3600)
-            await asyncio.to_thread(
+            ok, err = await asyncio.to_thread(
                 mailer.send_token_mail, "reset", email, token
             )
+            print(f"MAIL forgot reset -> {email}: ok={ok} err={err}")
     # Ответ всегда одинаковый - не раскрываем, существует ли такая почта
     return _auth_page(request, "forgot", "sent", "Если эта почта зарегистрирована, мы отправили на нее письмо со ссылкой для сброса пароля.")
 
@@ -481,6 +484,7 @@ async def web_link_email(request: Request):
 
     token = emailauth.issue_token(email, "link", tg_id)
     ok, err = await asyncio.to_thread(mailer.send_token_mail, "link", email, token)
+    print(f"MAIL cabinet link -> {email}: ok={ok} err={err}")
     if not ok:
         raise HTTPException(status_code=502, detail=f"Не удалось отправить письмо: {err}")
     return {"ok": True}

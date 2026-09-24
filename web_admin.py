@@ -100,7 +100,7 @@ async def admin_index(request: Request):
     pend_det = db.get_pending_detail_requests()
     pend_man = db.get_pending_manual_orders()
 
-    return templates.TemplateResponse("admin_index.html", _ctx(
+    return templates.TemplateResponse(request=request, name="admin_index.html", context=_ctx(
         request, "index",
         servers_total=len(servers),
         servers_active=len([s for s in servers if s[3]]),
@@ -146,7 +146,7 @@ async def admin_users(request: Request):
         })
 
     servers = db.get_active_servers() or []
-    return templates.TemplateResponse("admin_users.html", _ctx(
+    return templates.TemplateResponse(request=request, name="admin_users.html", context=_ctx(
         request, "users", users=users, servers=servers, root_admin=ROOT_ADMIN_ID
     ))
 
@@ -205,7 +205,7 @@ async def admin_servers(request: Request):
             "name": name, "limit": max_users, "paid": paid,
             "price_1d": p1, "price_7d": p7, "price_30d": p30,
         })
-    return templates.TemplateResponse("admin_servers.html", _ctx(request, "servers", servers=servers))
+    return templates.TemplateResponse(request=request, name="admin_servers.html", context=_ctx(request, "servers", servers=servers))
 
 
 @router.post("/servers/add")
@@ -274,7 +274,7 @@ async def admin_requests(request: Request):
         srv = db.get_server_by_id(o_srv)
         man.append({"id": o_id, "tg_id": o_tg, "server": srv[2] if srv else f"#{o_srv}",
                     "period": PERIOD_LABELS.get(o_period, o_period), "amount": o_amount, "created": o_created})
-    return templates.TemplateResponse("admin_requests.html", _ctx(
+    return templates.TemplateResponse(request=request, name="admin_requests.html", context=_ctx(
         request, "requests", details=det, manuals=man
     ))
 
@@ -347,7 +347,7 @@ async def admin_settings(request: Request):
             "is_secret": is_secret,
             "is_long": len(value or "") > 40 and not is_secret,
         })
-    return templates.TemplateResponse("admin_settings.html", _ctx(
+    return templates.TemplateResponse(request=request, name="admin_settings.html", context=_ctx(
         request, "settings", rows=rows, mail_status=mailer.describe()
     ))
 
@@ -385,7 +385,7 @@ async def admin_admins(request: Request):
         for r in rows:
             if r["tg_id"] == ROOT_ADMIN_ID:
                 r["is_root"] = True
-    return templates.TemplateResponse("admin_admins.html", _ctx(request, "admins", admins=rows))
+    return templates.TemplateResponse(request=request, name="admin_admins.html", context=_ctx(request, "admins", admins=rows))
 
 
 @router.post("/admins/add")
@@ -411,9 +411,32 @@ async def admin_remove(request: Request, tg_id: int = Form(...)):
 async def admin_broadcast_form(request: Request):
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
-    return templates.TemplateResponse("admin_broadcast.html", _ctx(
+    return templates.TemplateResponse(request=request, name="admin_broadcast.html", context=_ctx(
         request, "broadcast", users_count=len(db.get_unique_user_ids() or [])
     ))
+
+
+@router.post("/mailtest")
+async def admin_mailtest(request: Request, to: str = Form(...)):
+    """Проверка доставки почты прямо из настроек: шлем тестовое письмо и показываем точный ответ."""
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    to = to.strip()
+    if "@" not in to:
+        return _back("/admin/web/settings", error="Введите адрес для тестового письма.")
+    site_url = (db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+    html = mailer._letter_html(
+        "✉️ Почта работает!",
+        "Это тестовое письмо из веб-админки AmneziaWG VPN. Если оно пришло во <b>входящие</b> (а не в спам) - настройка почты удалась, регистрация по почте будет работать.",
+        site_url,
+        "Открыть сайт",
+        "Письмо отправлено администратором вручную для проверки доставки."
+    )
+    ok, err = await asyncio.to_thread(mailer.send_email, to, "Тестовое письмо — AmneziaWG VPN", html)
+    print(f"MAIL TEST to {to}: ok={ok} err={err}")
+    if ok:
+        return _back("/admin/web/settings", msg=f"Письмо принято почтовым сервисом ({mailer.describe()}). Проверьте {to}: входящие И ПАПКУ СПАМ. Также проверьте вкладку Emails->Logs в личном кабинете Resend.")
+    return _back("/admin/web/settings", error=f"Почтовый сервис ОТКЛОНИЛ отправку: {err}")
 
 
 @router.post("/broadcast")
