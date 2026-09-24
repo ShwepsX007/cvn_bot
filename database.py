@@ -56,7 +56,16 @@ def init_db():
         # Автооплата: активный провайдер (off/aipay/platega). По умолчанию выключена.
         ('payment_provider', 'off'),
         # ID способа оплаты Platega (в примерах их доков: 2 = СБП QR). Уточняется у менеджера.
-        ('platega_payment_method', '2')
+        ('platega_payment_method', '2'),
+        # Отправка писем (регистрация по почте): auto | smtp | resend | off
+        ('mail_mode', 'auto'),
+        ('mail_smtp_host', ''),
+        ('mail_smtp_port', '587'),
+        ('mail_smtp_user', ''),
+        ('mail_smtp_password', ''),
+        ('mail_smtp_tls', 'starttls'),
+        ('mail_from', ''),
+        ('mail_resend_key', '')
     ]
     cursor.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", default_settings)
     
@@ -125,6 +134,29 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN config_text TEXT")
     except sqlite3.OperationalError:
         pass
+
+    # === УЧЕТНЫЕ ЗАПИСИ ПО ПОЧТЕ (регистрация/вход на сайте без Telegram) ===
+    # tg_id заполняется при привязке (через бота, виджет входа или ссылку-привязку);
+    # одна почта может иметь tg_id, один tg может иметь несколько почт - это не запрещаем.
+    cursor.execute('''CREATE TABLE IF NOT EXISTS email_accounts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT,
+                        tg_id INTEGER,
+                        verified INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+
+    # Одноразовые токены из писем: verify (подтверждение), reset (сброс пароля),
+    # link (привязка почты к tg аккаунту)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS email_tokens (
+                        token TEXT PRIMARY KEY,
+                        email TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        tg_id INTEGER,
+                        expires_at TIMESTAMP NOT NULL,
+                        used INTEGER DEFAULT 0
+                    )''')
 
     conn.commit()
     conn.close()
@@ -313,6 +345,105 @@ def set_user_config(tg_id, server_id, config_text):
     cursor.execute("UPDATE users SET config_text=? WHERE tg_id=? AND server_id=?", (config_text, tg_id, server_id))
     conn.commit()
     conn.close()
+
+
+# --- УЧЕТНЫЕ ЗАПИСИ ПО ПОЧТЕ (email_accounts / email_tokens) ---
+def create_email_account(email, password_hash=None, tg_id=None, verified=0):
+    """Создает почтовую учетку. Возвращает id или None, если email уже занят."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO email_accounts (email, password_hash, tg_id, verified) VALUES (?, ?, ?, ?)",
+            (email, password_hash, tg_id, verified)
+        )
+        acc_id = cursor.lastrowid
+        conn.commit()
+        return acc_id
+    except sqlite3.IntegrityError:
+        return None
+    finally:
+        conn.close()
+
+def get_email_account(email):
+    """Ряд (id, email, password_hash, tg_id, verified) или None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email, password_hash, tg_id, verified FROM email_accounts WHERE email=?", (email,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def get_email_account_by_tg(tg_id):
+    """Ряд (id, email, password_hash, tg_id, verified) первой привязанной к tg почты или None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email, password_hash, tg_id, verified FROM email_accounts WHERE tg_id=? LIMIT 1", (tg_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def set_email_password(email, password_hash):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE email_accounts SET password_hash=? WHERE email=?", (password_hash, email))
+    conn.commit()
+    conn.close()
+
+def mark_email_verified(email):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE email_accounts SET verified=1 WHERE email=?", (email,))
+    conn.commit()
+    conn.close()
+
+def bind_email_to_tg(email, tg_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE email_accounts SET tg_id=? WHERE email=?", (tg_id, email))
+    conn.commit()
+    conn.close()
+
+def create_email_token(email, kind, tg_id, ttl_seconds):
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(24)
+    expires = (datetime.now() + timedelta(seconds=ttl_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO email_tokens (token, email, kind, tg_id, expires_at) VALUES (?, ?, ?, ?, ?)",
+        (token, email, kind, tg_id, expires)
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+def _fresh_token_row(cursor, token, kind):
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute(
+        "SELECT email, tg_id FROM email_tokens WHERE token=? AND kind=? AND used=0 AND expires_at > ?",
+        (token, kind, now)
+    )
+    return cursor.fetchone()
+
+def peek_email_token(token, kind):
+    """(email, tg_id) если токен жив, иначе None. Токен НЕ расходуется (для предпросмотра форм)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    row = _fresh_token_row(cursor, token, kind)
+    conn.close()
+    return row
+
+def consume_email_token(token, kind):
+    """(email, tg_id) если токен был жив - и он помечен использованным; иначе None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    row = _fresh_token_row(cursor, token, kind)
+    if row:
+        cursor.execute("UPDATE email_tokens SET used=1 WHERE token=?", (token,))
+        conn.commit()
+    conn.close()
+    return row
 
 
 def get_expired_users():

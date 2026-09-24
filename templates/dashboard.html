@@ -105,6 +105,23 @@
         {% endif %}
     </div>
 
+    <!-- ===================== ПОЧТА АККАУНТА ===================== -->
+    <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold mb-2">📧 Почта</h5>
+        {% if bound_email %}
+            <p class="mb-1">Привязана: <b>{{ bound_email }}</b></p>
+            <small class="text-muted d-block mb-2">По ней можно входить в кабинет на странице «Почта».
+            {% if not email_has_password %}Пароль еще не задан — создайте его через «Забыли пароль» на странице входа.{% endif %}</small>
+        {% else %}
+            <small class="text-muted d-block mb-2">Привяжите почту — сможете входить в кабинет по логину/паролю и восстанавливать доступ, даже если Telegram недоступен.</small>
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+                <input type="email" id="linkEmailInput" class="form-control" style="max-width:280px" placeholder="Ваша почта">
+                <button class="btn btn-outline-primary rounded-pill" onclick="linkEmail()">Привязать</button>
+            </div>
+            <div id="linkEmailResult" class="small mt-2"></div>
+        {% endif %}
+    </div>
+
     <!-- ===================== КУПИТЬ / ПРОДЛИТЬ ===================== -->
     <div class="card card-custom p-4 mb-4">
         <h5 class="fw-bold mb-3">🛍 Купить / продлить VPN</h5>
@@ -400,6 +417,26 @@ async function pollManual(orderId) {
             document.getElementById('methodResult').innerHTML += '<div class="alert alert-danger small mt-2">Платеж отклонен администратором.</div>';
         }
     } catch (e) { /* тихо игнорируем сетевые сбои опроса */ }
+}
+
+async function linkEmail() {
+    const input = document.getElementById('linkEmailInput');
+    const resDiv = document.getElementById('linkEmailResult');
+    const email = (input.value || '').trim();
+    if (!email) { resDiv.innerHTML = '<span class="text-danger">Введите почту.</span>'; return; }
+    resDiv.innerHTML = '⏳ Отправляем письмо со ссылкой...';
+    try {
+        const res = await fetch('/web/link_email', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email: email})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        resDiv.innerHTML = '<span class="text-success">✅ Письмо отправлено! Перейдите по ссылке из него — почта привяжется к этому аккаунту.</span>';
+        input.value = '';
+    } catch (e) {
+        resDiv.innerHTML = `<span class="text-danger">❌ ${escapeHtml(e.message)}</span>`;
+    }
 }
 
 async function sendSupport() {

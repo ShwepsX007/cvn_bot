@@ -10,10 +10,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram import html
 
+import asyncio
+
 import database as db
 import ssh_manager as ssh
 import payments
 import qrgen
+import emailauth
+import mailer
 from config import ADMIN_ID
 
 user_router = Router()
@@ -94,6 +98,9 @@ class SupportStates(StatesGroup):
 class BuyStates(StatesGroup):
     waiting_for_receipt = State()
 
+class EmailLinkStates(StatesGroup):
+    waiting_for_email = State()
+
 main_reply_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="🚀 Главное меню")]], 
     resize_keyboard=True,
@@ -105,11 +112,12 @@ def get_main_keyboard():
     builder.add(InlineKeyboardButton(text="🛍 Купить / Продлить VPN", callback_data="usr_buy_choose_srv"))
     builder.add(InlineKeyboardButton(text="🔑 Мои конфиги", callback_data="usr_my_configs"))
     builder.add(InlineKeyboardButton(text="👤 Мой профиль", callback_data="usr_profile"))
+    builder.add(InlineKeyboardButton(text="📧 Привязать почту", callback_data="usr_link_email"))
     builder.add(InlineKeyboardButton(text="ℹ️ Описание и условия", callback_data="usr_description"))
     builder.add(InlineKeyboardButton(text="📚 Инструкция по настройке", callback_data="usr_help"))
     builder.add(InlineKeyboardButton(text="🤝 Поддержка", callback_data="usr_support"))
     builder.add(InlineKeyboardButton(text="📜 Соглашение и Политика", callback_data="usr_tos"))
-    builder.adjust(1, 1, 1, 1, 2, 1)
+    builder.adjust(1, 1, 1, 1, 2, 2)
     return builder.as_markup()
 
 async def check_and_clean_expired(tg_id: int):
@@ -174,6 +182,85 @@ async def user_menu_cb(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Выберите интересующий раздел меню:", reply_markup=get_main_keyboard())
 
 # --- МОИ КОНФИГИ: повторная выдача файла и QR-кода в любое время ---
+# ==================== ПРИВЯЗКА ПОЧТЫ ИЗ БОТА ====================
+@user_router.callback_query(F.data == "usr_link_email")
+async def link_email_start(callback: CallbackQuery, state: FSMContext):
+    tg_id = callback.from_user.id
+    acc = db.get_email_account_by_tg(tg_id)
+
+    if not mailer.is_configured():
+        text = (
+            "📧 Привязка почты пока недоступна — почтовая отправка не настроена на сервере.\n"
+            "Попробуйте позже."
+        )
+        builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+        return await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+    if acc and acc[4]:
+        text = (
+            f"📧 К вашему аккаунту уже привязана почта:\n<b>{html.quote(acc[1])}</b>\n\n"
+            "По ней можно входить в личный кабинет на сайте (вкладка «Почта»).\n"
+            "Хотите заменить на другую? Просто отправьте новый адрес."
+        )
+    elif acc:
+        text = (
+            f"📧 Вы начали привязку почты <b>{html.quote(acc[1])}</b>, но не подтвердили её по ссылке из письма.\n\n"
+            "Отправьте адрес еще раз — пришлем новое письмо."
+        )
+    else:
+        text = (
+            "📧 <b>Привязка почты</b>\n\n"
+            "Отправьте адрес электронной почты. На него придет письмо со ссылкой — "
+            "перейдите по ней, и почта привяжется к этому аккаунту.\n\n"
+            "Зачем: вход в личный кабинет на сайте по логину/паролю и восстановление доступа, "
+            "даже если Telegram недоступен.\n\n"
+            "Отмена: /start"
+        )
+    builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+    await state.set_state(EmailLinkStates.waiting_for_email)
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@user_router.message(EmailLinkStates.waiting_for_email)
+async def link_email_process(message: Message, state: FSMContext):
+    tg_id = message.from_user.id
+    email = emailauth.normalize_email(message.text)
+
+    if not emailauth.valid_email(email):
+        return await message.answer(
+            "⚠️ Это не похоже на адрес почты. Попробуйте еще раз (например, name@gmail.com) или отмените: /start"
+        )
+
+    acc = db.get_email_account(email)
+    if acc and acc[3] and acc[3] != tg_id:
+        await state.clear()
+        return await message.answer(
+            "⚠️ Эта почта уже привязана к другому Telegram-аккаунту. Если это вы — "
+            "войдите с того аккаунта или напишите в поддержку."
+        )
+
+    if not acc:
+        # Этап 1: аккаунт без пароля - пароль пользователь задаст сразу после подтверждения ссылки
+        if db.create_email_account(email, tg_id=tg_id, verified=0) is None:
+            await state.clear()
+            return await message.answer("⚠️ Эта почта уже занята другим аккаунтом.")
+
+    token = emailauth.issue_token(email, "link", tg_id)
+    ok, err = await asyncio.to_thread(mailer.send_token_mail, "link", email, token)
+    if not ok:
+        print(f"Ошибка отправки письма привязки на {email}: {err}")
+        return await message.answer(
+            "❌ Не удалось отправить письмо. Возможно, почтовый сервис временно недоступен — попробуйте позже."
+        )
+
+    await state.clear()
+    await message.answer(
+        f"✅ Письмо отправлено на <b>{html.quote(email)}</b>!\n\n"
+        "Перейдите по ссылке из письма (действует 2 часа) — почта привяжется к аккаунту. "
+        "Сразу после этого сайт предложит задать пароль для входа в кабинет.",
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard()
+    )
+
 @user_router.callback_query(F.data == "usr_my_configs")
 async def my_configs(callback: CallbackQuery):
     await check_and_clean_expired(callback.from_user.id)

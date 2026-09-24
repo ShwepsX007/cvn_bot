@@ -3,6 +3,7 @@ import uuid
 import random
 import secrets
 from datetime import datetime, timedelta
+from urllib.parse import quote
 from fastapi import FastAPI, Request, HTTPException, Form, UploadFile, File
 from fastapi.responses import Response, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -20,6 +21,8 @@ import aipay
 import platega
 import payments
 import qrgen
+import emailauth
+import mailer
 import webauth
 
 from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, clean_inactive_users
@@ -161,6 +164,31 @@ async def read_root(request: Request):
 def _current_tg_id(request: Request):
     return request.session.get("tg_id")
 
+def _current_email(request: Request):
+    return request.session.get("email")
+
+def _client_host(request: Request):
+    return request.headers.get("X-Real-IP") or (request.client.host if request.client else None)
+
+_PW_MESSAGES = {
+    "short": "Пароль должен быть не короче 8 символов.",
+    "long": "Пароль слишком длинный (максимум 200 символов).",
+    "weak": "Слишком простой пароль - придумайте посложнее.",
+}
+
+def _pw_message(code: str) -> str:
+    return _PW_MESSAGES.get(code, "Пароль не подходит.")
+
+def _check_captcha(captcha_id: str, captcha_answer: str) -> bool:
+    """Разовая математическая капча (тот же механизм, что у пробного доступа)."""
+    saved = CAPTCHA_STORE.pop(captcha_id, None)
+    if not saved or saved["expires"] < datetime.utcnow():
+        return False
+    try:
+        return int(captcha_answer) == saved["answer"]
+    except (ValueError, TypeError):
+        return False
+
 @app.get("/login")
 async def login_page(request: Request):
     if _current_tg_id(request):
@@ -173,7 +201,8 @@ async def login_page(request: Request):
             "request": request,
             "bot_username": BOT_USERNAME,
             "site_url": site_url,
-            "error": request.query_params.get("error")
+            "error": request.query_params.get("error"),
+            "msg": request.query_params.get("msg")
         }
     )
 
@@ -199,6 +228,17 @@ async def auth_telegram(request: Request):
 
     request.session["tg_id"] = tg_id
     request.session["display_name"] = full_name
+
+    # Если до этого входили по почте - довязываем email к этому Telegram-аккаунту
+    email = _current_email(request)
+    if email:
+        try:
+            acc = bot_db.get_email_account(email)
+            if acc and (not acc[3] or acc[3] == tg_id):
+                bot_db.bind_email_to_tg(email, tg_id)
+        except Exception as e:
+            print(f"Ошибка привязки почты {email} к tg {tg_id}: {e}")
+
     return RedirectResponse(url="/dashboard")
 
 @app.get("/logout")
@@ -206,9 +246,236 @@ async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/")
 
+
+# ==================== РЕГИСТРАЦИЯ / ВХОД ПО ПОЧТЕ ====================
+@app.post("/auth/email/register")
+async def register_email(request: Request):
+    form = await request.form()
+    email = emailauth.normalize_email(str(form.get("email") or ""))
+    password = str(form.get("password") or "")
+    confirm = str(form.get("confirm") or "")
+    cap_id = str(form.get("captcha_id") or "")
+    cap_ans = str(form.get("captcha_answer") or "")
+
+    host = _client_host(request) or "unknown"
+    if not emailauth.REGISTER_LIMITER.allow(host):
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Слишком много попыток. Попробуйте позже."), status_code=303)
+    if not email or not emailauth.valid_email(email):
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Некорректный адрес почты."), status_code=303)
+    if not _check_captcha(cap_id, cap_ans):
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Неверный ответ на проверочный вопрос. Обновите страницу и попробуйте снова."), status_code=303)
+    if password != confirm:
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Пароли не совпадают."), status_code=303)
+    pw_err = emailauth.password_problem(password)
+    if pw_err:
+        return RedirectResponse(url="/login?tab=email&error=" + quote(_pw_message(pw_err)), status_code=303)
+
+    acc = bot_db.get_email_account(email)
+    if acc and acc[4]:
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Эта почта уже зарегистрирована. Просто войдите."), status_code=303)
+
+    password_hash = emailauth.hash_password(password)
+    if acc:
+        # Перерегистрация неподтвержденного адреса - обновляем пароль и шлем письмо снова
+        bot_db.set_email_password(email, password_hash)
+    else:
+        if bot_db.create_email_account(email, password_hash=password_hash) is None:
+            return RedirectResponse(url="/login?tab=email&error=" + quote("Эта почта уже занята."), status_code=303)
+
+    token = bot_db.create_email_token(email, "verify", None, 24 * 3600)
+    ok, _err = await asyncio.to_thread(
+        mailer.send_token_mail, "verify", email, token
+    )
+    if not ok:
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Не удалось отправить письмо. Попробуйте позже или войдите через Telegram."), status_code=303)
+    return RedirectResponse(url="/login?tab=email&msg=" + quote("Письмо с подтверждением отправлено на " + email + ". Перейдите по ссылке из письма."), status_code=303)
+
+
+@app.post("/auth/email/login")
+async def login_email(request: Request):
+    form = await request.form()
+    email = emailauth.normalize_email(str(form.get("email") or ""))
+    password = str(form.get("password") or "")
+    host = _client_host(request) or "unknown"
+    if not emailauth.LOGIN_LIMITER.allow(host):
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Слишком много попыток входа. Попробуйте через 10 минут."), status_code=303)
+
+    acc = bot_db.get_email_account(email) if email else None
+    if acc and acc[4] and not acc[2]:
+        # Почта подтверждена (привязана из бота), но пароль так и не задали
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Для этой почты еще не задан пароль - нажмите «Забыли пароль?» ниже."), status_code=303)
+    if not acc or not acc[2] or not emailauth.verify_password(password, acc[2]):
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Неверная почта или пароль."), status_code=303)
+    if not acc[4]:
+        # Неподтвержденная почта - шлем письмо еще раз
+        token = bot_db.create_email_token(email, "verify", acc[3], 24 * 3600)
+        await asyncio.to_thread(
+            mailer.send_token_mail, "verify", email, token
+        )
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Почта не подтверждена. Мы отправили письмо повторно - перейдите по ссылке из него."), status_code=303)
+
+    request.session["email"] = email
+    if acc[3]:
+        request.session["tg_id"] = acc[3]
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
+def _auth_page(request: Request, mode: str, status: str = "form", message: str = "", token: str = "", email: str = "", reset_token: str = ""):
+    return templates.TemplateResponse(
+        request=request,
+        name="auth_email.html",
+        context={
+            "request": request, "mode": mode, "status": status,
+            "message": message, "token": token, "email": email,
+            "reset_token": reset_token,
+            "bot_username": BOT_USERNAME
+        }
+    )
+
+
+@app.get("/auth/email/verify")
+async def verify_email(request: Request):
+    token = str(request.query_params.get("token") or "")
+    row = await asyncio.to_thread(bot_db.consume_email_token, token, "verify") if token else None
+    if not row:
+        return _auth_page(request, "verify", "invalid", "Ссылка недействительна или истекла. Попробуйте войти - мы отправим письмо с подтверждением повторно.")
+    email, _tg = row
+    bot_db.mark_email_verified(email)
+    request.session["email"] = email
+    acc = bot_db.get_email_account(email)
+    if acc and acc[3]:
+        request.session["tg_id"] = acc[3]
+    return _auth_page(request, "verify", "ok", "Почта подтверждена!", email=email)
+
+
+@app.get("/auth/email/forgot")
+async def forgot_get(request: Request):
+    return _auth_page(request, "forgot", "form")
+
+
+@app.post("/auth/email/forgot")
+async def forgot_post(request: Request):
+    form = await request.form()
+    email = emailauth.normalize_email(str(form.get("email") or ""))
+    host = _client_host(request) or "unknown"
+    if emailauth.REGISTER_LIMITER.allow(host):
+        acc = bot_db.get_email_account(email) if email else None
+        if acc and acc[2]:
+            token = bot_db.create_email_token(email, "reset", acc[3], 3600)
+            await asyncio.to_thread(
+                mailer.send_token_mail, "reset", email, token
+            )
+    # Ответ всегда одинаковый - не раскрываем, существует ли такая почта
+    return _auth_page(request, "forgot", "sent", "Если эта почта зарегистрирована, мы отправили на нее письмо со ссылкой для сброса пароля.")
+
+
+@app.get("/auth/email/reset")
+async def reset_get(request: Request):
+    token = str(request.query_params.get("token") or "")
+    row = await asyncio.to_thread(bot_db.peek_email_token, token, "reset") if token else None
+    if not row:
+        return _auth_page(request, "reset", "invalid", "Ссылка для сброса недействительна или истекла. Запросите новую.")
+    return _auth_page(request, "reset", "form", token=token, email=row[0])
+
+
+@app.post("/auth/email/reset")
+async def reset_post(request: Request):
+    form = await request.form()
+    token = str(form.get("token") or "")
+    password = str(form.get("password") or "")
+    confirm = str(form.get("confirm") or "")
+    if password != confirm:
+        return _auth_page(request, "reset", "form", "Пароли не совпадают.", token=token)
+    pw_err = emailauth.password_problem(password)
+    if pw_err:
+        return _auth_page(request, "reset", "form", _pw_message(pw_err), token=token)
+    row = await asyncio.to_thread(bot_db.consume_email_token, token, "reset") if token else None
+    if not row:
+        return _auth_page(request, "reset", "invalid", "Ссылка для сброса недействительна или истекла. Запросите новую.")
+    email, _tg = row
+    bot_db.set_email_password(email, emailauth.hash_password(password))
+    bot_db.mark_email_verified(email)
+    request.session["email"] = email
+    acc = bot_db.get_email_account(email)
+    if acc and acc[3]:
+        request.session["tg_id"] = acc[3]
+    return _auth_page(request, "reset", "ok", "Пароль установлен!", email=email)
+
+
+@app.post("/web/link_email")
+async def web_link_email(request: Request):
+    """Запрос на привязку почты из кабинета (пришлем письмо со ссылкой)."""
+    tg_id = _current_tg_id(request)
+    if not tg_id:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = emailauth.normalize_email(str((body or {}).get("email") or ""))
+    if not emailauth.valid_email(email):
+        raise HTTPException(status_code=400, detail="Некорректный адрес почты.")
+
+    host = _client_host(request) or "unknown"
+    if not emailauth.MAIL_LINK_LIMITER.allow(host):
+        raise HTTPException(status_code=429, detail="Слишком много писем подряд. Попробуйте через час.")
+
+    acc = bot_db.get_email_account(email)
+    if acc and acc[3] and acc[3] != tg_id:
+        raise HTTPException(status_code=409, detail="Эта почта уже привязана к другому Telegram-аккаунту.")
+    if acc and acc[4] and acc[3] == tg_id:
+        return {"ok": True, "already": True}
+    if not acc:
+        if bot_db.create_email_account(email, tg_id=tg_id, verified=0) is None:
+            raise HTTPException(status_code=409, detail="Эта почта уже занята другим аккаунтом.")
+
+    token = emailauth.issue_token(email, "link", tg_id)
+    ok, err = await asyncio.to_thread(mailer.send_token_mail, "link", email, token)
+    if not ok:
+        raise HTTPException(status_code=502, detail=f"Не удалось отправить письмо: {err}")
+    return {"ok": True}
+
+
+@app.get("/auth/email/link")
+async def link_email_confirm(request: Request):
+    """Подтверждение привязки почты из телеграм-бота по ссылке из письма."""
+    token = str(request.query_params.get("token") or "")
+    row = await asyncio.to_thread(bot_db.consume_email_token, token, "link") if token else None
+    if not row:
+        return _auth_page(request, "link", "invalid", "Ссылка привязки недействительна или истекла. Запросите новую в боте.")
+    email, tg_id = row
+    bot_db.bind_email_to_tg(email, tg_id)
+    bot_db.mark_email_verified(email)
+    # Если у аккаунта еще нет пароля - сразу предлагаем задать его по свежей ссылке
+    acc = bot_db.get_email_account(email)
+    reset_token = ""
+    if acc and not acc[2]:
+        reset_token = bot_db.create_email_token(email, "reset", tg_id, 3600)
+    return _auth_page(request, "link", "ok", "Почта успешно привязана к вашему аккаунту!", email=email, reset_token=reset_token)
+
 @app.get("/dashboard")
 async def dashboard(request: Request):
     tg_id = _current_tg_id(request)
+
+    # Сессия по почте: если почта уже привязана к Telegram - работаем как tg-аккаунт;
+    # если нет - сначала просим привязать Telegram (виджетом), иначе уведомления и подписки некуда вязать.
+    if not tg_id and _current_email(request):
+        acc = bot_db.get_email_account(_current_email(request))
+        if acc and acc[3]:
+            request.session["tg_id"] = acc[3]
+            tg_id = acc[3]
+        else:
+            return templates.TemplateResponse(
+                request=request,
+                name="link_telegram.html",
+                context={
+                    "request": request,
+                    "bot_username": BOT_USERNAME,
+                    "site_url": bot_db.get_setting("site_url") or "https://amneziawg.fun",
+                    "email": _current_email(request),
+                }
+            )
+
     if not tg_id:
         return RedirectResponse(url="/login")
 
@@ -262,6 +529,8 @@ async def dashboard(request: Request):
                 "can_trial": can_trial
             })
 
+    email_acc = bot_db.get_email_account_by_tg(tg_id) if tg_id else None
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -275,6 +544,9 @@ async def dashboard(request: Request):
             "trial_hours": bot_db.get_setting("trial_hours"),
             # кнопка автооплаты рисуется, только если провайдер включен (payments.py)
             "auto_pay_enabled": payments.is_auto_pay_enabled(),
+            # привязанная почта (если есть) - для карточки "Почта" в кабинете
+            "bound_email": (email_acc or (None, None))[1],
+            "email_has_password": bool(email_acc and email_acc[2]),
         }
     )
 
