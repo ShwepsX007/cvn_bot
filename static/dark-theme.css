@@ -1,0 +1,95 @@
+/* ================================================================
+   Тёмная тема сайта AmneziaWG VPN
+   Подключается последней в <head> после bootstrap и инлайн-стилей,
+   !important стоит только там, где надо переиграть инлайн-стили шаблонов.
+   Плюс на <html> в шаблонах добавлен атрибут data-bs-theme="dark" -
+   он включает тёмный вариант компонентов bootstrap 5.3.
+   ================================================================ */
+
+:root { color-scheme: dark; }
+
+body {
+    background-color: #0d1117 !important;
+    color: #e6edf3 !important;
+}
+
+/* Яркий голубой градиент шапок -> приглушенная синева, уместная в тёмной теме */
+.hero-section,
+.topbar {
+    background: linear-gradient(135deg, #153a75, #0e5a61) !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55) !important;
+    color: #e6edf3;
+}
+
+/* Карточки и аккордеон */
+.card,
+.card-custom,
+.login-card,
+.accordion-item {
+    background-color: #161b22 !important;
+    border-color: #30363d !important;
+    color: #e6edf3;
+}
+.card-custom,
+.card-custom:hover {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.accordion-button {
+    background-color: #161b22 !important;
+    color: #e6edf3 !important;
+}
+.accordion-button:not(.collapsed) {
+    background-color: #1b2333 !important;
+    color: #e6edf3 !important;
+}
+
+/* Модальное окно оплаты */
+.modal-content {
+    background-color: #161b22;
+    border-color: #30363d;
+}
+.btn-close {
+    filter: invert(1) grayscale(100%) brightness(1.9);
+}
+
+/* Тексты и рамки */
+.text-muted { color: #8b949e !important; }
+.border     { border-color: #30363d !important; }
+hr          { border-color: #30363d !important; }
+a { color: #58a6ff; }
+
+/* Светлые утилитарные фоны bootstrap -> в тёмную палитру */
+.bg-white { background-color: #161b22 !important; color: #e6edf3 !important; }
+.bg-light { background-color: #21262d !important; color: #e6edf3 !important; }
+
+/* Блоки с кодом/реквизитами/конфигом */
+pre {
+    background-color: #0d1117 !important;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    color: #d6e2ee;
+}
+code { color: #79c0ff; }
+
+/* Поля ввода (поддержка, капча, загрузка чека) */
+.form-control,
+.form-control:focus {
+    background-color: #0d1117;
+    color: #e6edf3;
+    border-color: #30363d;
+}
+.form-control::placeholder { color: #6e7681; }
+
+/* QR-код конфига: белая плашка-подложка, чтобы сканировался любой камерой */
+.qr-img {
+    background: #ffffff;
+    padding: 10px;
+    border-radius: 12px;
+}
+
+/* Текст конфига в личном кабинете */
+.cfg-pre {
+    max-height: 320px;
+    overflow: auto;
+    font-size: 0.78rem;
+}

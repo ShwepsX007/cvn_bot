@@ -19,6 +19,7 @@ import database as bot_db
 import aipay
 import platega
 import payments
+import qrgen
 import webauth
 
 from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, clean_inactive_users
@@ -561,6 +562,42 @@ async def download_config(request: Request, server_id: int):
         media_type="application/octet-stream",
         headers={"Content-Disposition": f"attachment; filename={tg_id}AWG.conf"}
     )
+
+@app.get("/qr/{server_id}")
+async def qr_config(request: Request, server_id: int):
+    """PNG с QR-кодом конфига - для быстрого импорта на смартфон прямо с экрана (скан в приложении AmneziaWG)."""
+    tg_id = _current_tg_id(request)
+    if not tg_id:
+        raise HTTPException(status_code=401, detail="Необходимо войти через Telegram")
+
+    sub = bot_db.get_user_sub(tg_id, server_id)
+    if not sub or sub[5] == 0:
+        raise HTTPException(status_code=403, detail="Подписка не найдена или неактивна")
+
+    config_text = bot_db.get_user_config(tg_id, server_id)
+    if not config_text:
+        raise HTTPException(status_code=404, detail="Конфигурация еще не сохранена. Нажмите «Обновить конфиг».")
+
+    png = qrgen.make_qr_png(config_text)
+    if not png:
+        raise HTTPException(status_code=503, detail="QR-модуль (segno) не установлен на сервере")
+    return Response(content=png, media_type="image/png")
+
+@app.get("/web/config/{server_id}")
+async def web_get_config(request: Request, server_id: int):
+    """Текст конфига для показа в личном кабинете по кнопке (не встраиваем в HTML страницы изначально)."""
+    tg_id = _current_tg_id(request)
+    if not tg_id:
+        raise HTTPException(status_code=401, detail="Необходимо войти через Telegram")
+
+    sub = bot_db.get_user_sub(tg_id, server_id)
+    if not sub or sub[5] == 0:
+        raise HTTPException(status_code=403, detail="Подписка не найдена или неактивна")
+
+    config_text = bot_db.get_user_config(tg_id, server_id)
+    if not config_text:
+        raise HTTPException(status_code=404, detail="Конфигурация еще не сохранена. Нажмите «Обновить конфиг».")
+    return {"config": config_text}
 
 @app.post("/webhook/aipay")
 async def aipay_webhook(request: Request):

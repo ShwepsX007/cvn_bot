@@ -13,6 +13,7 @@ from aiogram import html
 import database as db
 import ssh_manager as ssh
 import payments
+import qrgen
 from config import ADMIN_ID
 
 user_router = Router()
@@ -102,12 +103,13 @@ main_reply_kb = ReplyKeyboardMarkup(
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="🛍 Купить / Продлить VPN", callback_data="usr_buy_choose_srv"))
+    builder.add(InlineKeyboardButton(text="🔑 Мои конфиги", callback_data="usr_my_configs"))
     builder.add(InlineKeyboardButton(text="👤 Мой профиль", callback_data="usr_profile"))
     builder.add(InlineKeyboardButton(text="ℹ️ Описание и условия", callback_data="usr_description"))
     builder.add(InlineKeyboardButton(text="📚 Инструкция по настройке", callback_data="usr_help"))
     builder.add(InlineKeyboardButton(text="🤝 Поддержка", callback_data="usr_support"))
     builder.add(InlineKeyboardButton(text="📜 Соглашение и Политика", callback_data="usr_tos"))
-    builder.adjust(1, 1, 1, 2, 1)
+    builder.adjust(1, 1, 1, 1, 2, 1)
     return builder.as_markup()
 
 async def check_and_clean_expired(tg_id: int):
@@ -170,6 +172,73 @@ async def main_menu_btn(message: Message, state: FSMContext):
 async def user_menu_cb(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("Выберите интересующий раздел меню:", reply_markup=get_main_keyboard())
+
+# --- МОИ КОНФИГИ: повторная выдача файла и QR-кода в любое время ---
+@user_router.callback_query(F.data == "usr_my_configs")
+async def my_configs(callback: CallbackQuery):
+    await check_and_clean_expired(callback.from_user.id)
+    tg_id = callback.from_user.id
+    subs = db.get_user_subs(tg_id)
+    active_subs = [s for s in subs if s[5] == 1]
+
+    if not active_subs:
+        text = "🔑 У вас пока нет активных подписок. Оформите их в разделе «🛍 Купить / Продлить VPN»."
+        builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+        return await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+    text = (
+        "🔑 <b>МОИ КОНФИГУРАЦИИ</b>\n\n"
+        "Выберите сервер — пришлю файл <code>.conf</code> и QR-код для быстрого подключения телефона с экрана компьютера:"
+    )
+    builder = InlineKeyboardBuilder()
+    for sub in active_subs:
+        t_id, s_id, uname, exp_date_str, has_trial, active, is_trial, notif, last_exp = sub
+        srv = db.get_server_by_id(s_id)
+        srv_name = srv[2] if srv else f"Сервер {s_id}"
+        has_cfg = bool(db.get_user_config(tg_id, s_id))
+        mark = "🔑" if has_cfg else "🔄"  # 🔄 - конфиг не сохранен, будет перевыпущен
+        builder.add(InlineKeyboardButton(text=f"{mark} {srv_name}", callback_data=f"mycfg_get_{s_id}"))
+    builder.add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+    builder.adjust(1)
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@user_router.callback_query(F.data.startswith("mycfg_get_"))
+async def mycfg_get(callback: CallbackQuery):
+    s_id = int(callback.data.replace("mycfg_get_", ""))
+    tg_id = callback.from_user.id
+
+    sub = db.get_user_sub(tg_id, s_id)
+    if not sub or sub[5] != 1:
+        return await callback.answer("Подписка не найдена или уже неактивна.", show_alert=True)
+
+    srv = db.get_server_by_id(s_id)
+    srv_name = srv[2] if srv else f"Сервер {s_id}"
+
+    config_text = db.get_user_config(tg_id, s_id)
+    if not config_text:
+        # Старая подписка без сохраненного конфига - перевыпускаем на актуальной версии сервера
+        await callback.answer("Конфиг не сохранен — перевыпускаю новый...", show_alert=False)
+        success, msg = await reissue_config_for_active_sub(callback.bot, tg_id, s_id)
+        if not success:
+            await callback.message.answer(
+                f"❌ Не удалось перевыпустить конфиг:\n<code>{html.quote(str(msg))}</code>",
+                parse_mode="HTML"
+            )
+        return
+
+    config_file = BufferedInputFile(config_text.encode("utf-8"), filename=f"ID{s_id}AWG.conf")
+    await callback.message.answer_document(
+        config_file,
+        caption=f"🔑 Ваш конфиг — сервер <b>{html.quote(srv_name)}</b>. Импортируйте файл в приложение AmneziaWG.",
+        parse_mode="HTML"
+    )
+    qr_png = qrgen.make_qr_png(config_text)
+    if qr_png:
+        await callback.message.answer_photo(
+            BufferedInputFile(qr_png, filename="vpn_qr.png"),
+            caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
+        )
+    await callback.answer()
 
 @user_router.callback_query(F.data == "usr_profile")
 async def show_profile(callback: CallbackQuery):
@@ -618,6 +687,18 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
     except Exception:
         pass
 
+    # QR-код того же конфига - удобно импортировать на телефон, не пересылая файл
+    qr_png = qrgen.make_qr_png(config_text)
+    if qr_png:
+        try:
+            await bot.send_photo(
+                tg_id,
+                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
+            )
+        except Exception:
+            pass
+
     return True, config_text
 
 async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
@@ -682,6 +763,17 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
     try:
         await bot.send_document(tg_id, config_file, caption=caption, parse_mode="HTML")
     except Exception: pass
+
+    # QR-код того же конфига - удобно импортировать на телефон, не пересылая файл
+    qr_png = qrgen.make_qr_png(config_text)
+    if qr_png:
+        try:
+            await bot.send_photo(
+                tg_id,
+                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
+            )
+        except Exception: pass
 
     await _notify_admin_grant(bot, tg_id, srv_name, period, renewed=False, notify_admin=notify_admin)
     return True, config_text
