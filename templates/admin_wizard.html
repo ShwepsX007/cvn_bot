@@ -63,11 +63,12 @@
 cat &gt; /etc/systemd/system/ssh.socket.d/listen.conf &lt;&lt;'EOF'
 [Socket]
 ListenStream=
-ListenStream=22
-ListenStream=2222
+ListenStream=0.0.0.0:22
+ListenStream=0.0.0.0:2222
 EOF
 systemctl daemon-reload
 systemctl restart ssh.socket</pre>
+                  <small class="text-muted">⚠️ Именно <code>0.0.0.0:</code>, а не просто 22/2222 — иначе иногда получается слушатель только на IPv6 (<code>[::]</code> в <code>ss -tlnp</code>) и мастер по IPv4 стучится в пустоту.</small>
                 </li>
                 <li><b>Ubuntu 22.04 и старее (обычный sshd):</b>
                   <code>echo -e "Port 22\nPort 2222" &gt;&gt; /etc/ssh/sshd_config && systemctl restart sshd</code>

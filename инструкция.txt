@@ -21,11 +21,14 @@
            cat > /etc/systemd/system/ssh.socket.d/listen.conf <<'EOF'
            [Socket]
            ListenStream=
-           ListenStream=22
-           ListenStream=2222
+           ListenStream=0.0.0.0:22
+           ListenStream=0.0.0.0:2222
            EOF
            systemctl daemon-reload
            systemctl restart ssh.socket
+
+           # ВАЖНО: именно 0.0.0.0:22, а не просто 22 — иначе бывает, что слушатель
+           # поднимается только на IPv6 ([::] в ss -tlnp), и по IPv4 порт "закрыт".
 
        Ubuntu 22.04 и старее (обычный sshd):
            echo -e "Port 22\nPort 2222" >> /etc/ssh/sshd_config
