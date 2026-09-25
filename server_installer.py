@@ -407,6 +407,26 @@ def _heal_existing_container(ssh, log_lines):
             "Хвост логов контейнера:\n" + logs + "\nПришлите это на проверку.")
     _log(log_lines, f"   сохраняю UDP-порт: {host_port}")
 
+    # Разводим два случая:
+    #  (а) в volume есть awg0.conf -> честный ремонт с сохранением ключей и пиров (ниже);
+    #  (б) конфига НЕТ (фабрик-контейнер/пустой volume - логи пустые, стартует и тут же падает,
+    #      потому что образу нечего запускать) -> по сути это не «починка», а ПОЛНАЯ УСТАНОВКА,
+    #      только с сохранением внешнего UDP-порта: генерируем ключи, пишем конфиг, настраиваем NAT.
+    code, has_conf, _ = _run(ssh, f"ls -1 {src}/{AWG_IFACE}.conf 2>/dev/null", timeout=30)
+    if not has_conf.strip():
+        _log(log_lines, "   ⚠️ В volume НЕТ конфига awg0.conf (заводской/пустой контейнер - поэтому он и падал без логов). "
+                        "Разворачиваю полную установку по шаблону с тем же UDP-портом...")
+        _install_amnezia_container(ssh, int(host_port), log_lines)
+        _run(ssh, "sleep 4", timeout=30)
+        if not _container_awg_ok(ssh):
+            logs3 = _tail_logs(ssh)
+            raise InstallError(
+                "Полная установка прошла, но контейнер все равно не поднимается. Хвост логов:\n" + logs3 + "\n"
+                "Частые причины: VPS без TUN (OpenVZ/LXC вместо KVM) - на ноде выполните: ls /dev/net/tun ; "
+                "если файла нет - просите хостера включить TUN/TAP или берите KVM-VPS.")
+        _log(log_lines, "✅ Полная установка вместо заводской заглушки завершена успешно")
+        return
+    _log(log_lines, "🔧 В volume конфиг есть - пересоздаю контейнер с сохранением ключей и пиров...")
     _log(log_lines, "📥 Подтягиваю образ (%s)..." % AWG_IMAGE)
     _must(ssh, f"docker pull {AWG_IMAGE}", "docker pull", log_lines, timeout=900)
 
