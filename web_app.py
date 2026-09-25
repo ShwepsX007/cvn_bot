@@ -132,6 +132,11 @@ async def create_amnezia_peer(ip: str, port: int) -> tuple[str, str]:
     config_text = await ssh.run_ssh_command(ip, port, cmd)
     if not config_text or "Ошибка" in config_text:
         raise Exception(f"SSH Error: {config_text}")
+    # docker exec на некоторых нодах возвращает Windows-like \r\n в выводе.
+    # Оставленный \r внутри ключа/PSK/obf-параметров ломает парсинг AmneziaWG:
+    # файл импортируется, но соединение не поднимается, а сканер QR может не
+    # считать такой конфиг с экрана. Санируем ВСЕ возвраты каретки безусловно.
+    config_text = config_text.replace("\r\n", "\n").replace("\r", "\n")
     return config_text, peer_id
 
 async def delete_amnezia_peer(ip: str, port: int, peer_id: str):

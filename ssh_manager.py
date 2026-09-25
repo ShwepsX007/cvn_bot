@@ -50,6 +50,11 @@ async def run_ssh_command(ip, port, cmd):
     stdout, stderr = await process.communicate()
     err_text = stderr.decode(errors="replace").strip()
     out_text = stdout.decode(errors="replace").strip()
+    # docker exec на нодах AmneziaWG часто возвращает Windows-style \r\n
+    # (TTY-режим). Сбрасываем \r у обоих потоков, чтобы не тащить каретку
+    # в конфиги WireGuard, в парсер awg dump и в сравнения строк ("Ошибка" и т.п.).
+    err_text = err_text.replace("\r\n", "\n").replace("\r", "\n")
+    out_text = out_text.replace("\r\n", "\n").replace("\r", "\n")
     if process.returncode != 0:
         return f"Ошибка: {err_text or out_text}"
     return out_text
