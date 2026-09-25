@@ -5,10 +5,13 @@
 <div class="col-lg-7">
 
 <div class="card card-custom p-4 mb-4">
-    <h5 class="fw-bold mb-1">🧙‍♂️ Мастер установки нового сервера</h5>
+    <h5 class="fw-bold mb-1">🧙‍♂️ Мастер подключения сервера</h5>
     <small class="text-muted d-block mb-3">
-        Всё, что раньше делалось руками в терминале (ssh-copy-id, установка AmneziaWG, заливка скриптов),
-        выполнится автоматически. Нужен только IP и root-пароль от нового VPS. Пароль нигде не сохраняется.
+        Рекомендуемый сценарий: <b>сначала 1–4 шага инструкции справа</b> (подготовка сервера +
+        установка Amnezia официальным приложением), потом эта форма. Мастер сам докинет SSH-ключ бота,
+        проверит контейнер, зальёт скрипты выдачи конфигов и занесёт сервер в базу.
+        Если Amnezia на ноде ещё нет — мастер попробует поставить её сам, но проверенный путь — приложение.
+        Пароль нигде не сохраняется.
     </small>
     <form method="post" action="/admin/web/servers/wizard" id="wizardForm">
         <div class="row g-2">
@@ -19,6 +22,7 @@
             <div class="col-md-5">
                 <label class="form-label small text-muted">SSH-порт</label>
                 <input type="number" name="ssh_port" class="form-control" value="2222" required>
+                <small class="text-muted">обычно <b>2222</b> — см. шаг 3 инструкции справа</small>
             </div>
             <div class="col-12">
                 <label class="form-label small text-muted">Пароль root нового сервера</label>
@@ -46,27 +50,53 @@
 <div class="col-lg-5">
 
 <div class="card card-custom p-4 mb-4">
-    <h6 class="fw-bold mb-3">📋 Как запускать новый сервер (инструкция)</h6>
+    <h6 class="fw-bold mb-1">📋 Подготовка нового сервера (перед запуском мастера)</h6>
+    <small class="text-muted d-block mb-3">Сервер бота НЕ может подключаться к внешнему порту 22 (у его хостера закрыт исходящий TCP/22), поэтому SSH ноды обязан слушать также на <b>2222</b>. Все 7 шагов занимают ~15 минут, 1–4 делаются один раз на новом VPS.</small>
     <ol class="small mb-0">
-        <li><b>Купите VPS</b> Ubuntu 22.04/24.04 (минимум 1 CPU / 512MB). Сохраните <b>IP</b> и <b>root-пароль</b> (приходят в панели хостера или на почту).</li>
-        <li class="mt-2">Если у вас НЕ стандартный SSH-порт 22 — бот ходит на порт <b>2222</b>. В мастере укажите тот, что сейчас (обычно <b>22</b> для нового VPS).</li>
-        <li class="mt-2"><b>Запустите мастер</b> слева. Он сам: передаст SSH-ключ, поставит AmneziaWG (docker + контейнер amnezia-awg2) со случайным защитным UDP-портом, настроит NAT, зальёт скрипты выдачи/удаления конфигов и занесёт сервер в базу.</li>
-        <li class="mt-2">В конце мастер покажет <b>внешний UDP-порт AmneziaWG</b>. Если у хостера есть внешний firewall (Cloud-сети/Security Groups) — откройте этот UDP-порт в его панели.</li>
-        <li class="mt-2"><b>Проверка:</b> «Клиенты» → выдайте себе тестовый доступ на новый сервер → импортируйте конфиг в AmneziaWG на телефоне и включите.</li>
-        <li class="mt-2">Цены на сервер задаются отдельно: страница «Серверы» (если пусто — действуют глобальные из «Настроек»).</li>
+        <li><b>Купите VPS</b> Ubuntu 22.04/24.04, <b>KVM</b> (не OpenVZ/LXC: проверить позже можно командой <code>systemd-detect-virt</code> → должно быть <code>kvm</code>). Сохраните <b>IP</b> и <b>root-пароль</b>.</li>
+        <li class="mt-2"><b>Firewall хостера (в его веб-панели):</b> откройте <b>TCP 2222</b>, источник <code>0.0.0.0/0</code>. Сюда же позже откроем UDP-порт Amnezia (шаг 6).</li>
+        <li class="mt-2"><b>Включите второй SSH-порт 2222</b> (через VNC/веб-консоль хостера на самом VPS).<br>
+            Общая проверка какой у вас вариант: <code>systemctl status ssh.socket --no-pager</code>
+            <ul class="mb-0 mt-1">
+                <li><b>Ubuntu 24.04 (ssh.socket активен):</b>
+<pre class="p-2 rounded mb-1 mt-1" style="background:#161b22;color:#e6edf3">mkdir -p /etc/systemd/system/ssh.socket.d
+cat &gt; /etc/systemd/system/ssh.socket.d/listen.conf &lt;&lt;'EOF'
+[Socket]
+ListenStream=
+ListenStream=22
+ListenStream=2222
+EOF
+systemctl daemon-reload
+systemctl restart ssh.socket</pre>
+                </li>
+                <li><b>Ubuntu 22.04 и старее (обычный sshd):</b>
+                  <code>echo -e "Port 22\nPort 2222" &gt;&gt; /etc/ssh/sshd_config && systemctl restart sshd</code>
+                </li>
+            </ul>
+            <b>Проверка:</b> <code>ss -tlnp | grep sshd</code> — должны слушаться <b>оба</b> порта 22 и 2222. И с компьютера <code>ssh root@IP -p 2222</code> — пускает.
+        </li>
+        <li class="mt-2"><b>Установите Amnezia официальным приложением</b> со своего компьютера (с вашего ПК порт 22 доступен — это нормально):
+            в приложении добавьте сервер (IP / порт 22 / root / пароль), выберите установку <b>AmneziaWG</b>, дождитесь конца,
+            создайте в приложении тестового клиента и подключитесь им — убедитесь, что VPN реально работает.
+            Этот шаг — наш проверенный боевой способ; контейнер <code>amnezia-awg2</code> приложение создаст само.
+        </li>
+        <li class="mt-2"><b>Запустите мастер</b> слева: IP, SSH-порт <b>2222</b>, root-пароль. Мастер докинет SSH-ключ бота, проверит здоровье контейнера (при необходимости — подремонтирует), зальёт <code>add_user.sh</code>/<code>remove_user.sh</code> и внесёт сервер в продажу.</li>
+        <li class="mt-2"><b>Откройте внешний UDP-порт</b> — мастер покажет его в журнале в конце (например <code>40158/udp</code>). Откройте его в firewall-панели хостера (UDP, 0.0.0.0/0).</li>
+        <li class="mt-2"><b>Проверка через бота:</b> «Клиенты» → тестовый доступ на новый сервер → конфиг на телефон → включить. Дальше сервер в продакшене.</li>
     </ol>
 </div>
 
 <div class="card card-custom p-4">
-    <h6 class="fw-bold mb-2">🛠 Что делает автоустановщик (шаблон)</h6>
-    <ul class="small text-muted mb-0">
-        <li>docker + образ <code>amneziavpn/amneziawg-go</code></li>
-        <li>конфиг <code>awg0.conf</code> с параметрами обфускации (Jc/Jmin/Jmax, H1-H4…)</li>
-        <li><code>ip_forward</code>, NAT <code>MASQUERADE</code>, сохранение правил iptables</li>
-        <li>случайный внешний UDP-порт (10000–59999)</li>
-        <li>SSH-ключ бота в <code>authorized_keys</code></li>
-        <li><code>add_user.sh</code>/<code>remove_user.sh</code> в /root/ (+chmod, чистка переносов)</li>
-    </ul>
+    <h6 class="fw-bold mb-2">🚑 Если не сработало — распознавание по ошибке</h6>
+    <table class="table table-sm small mb-0">
+        <tbody>
+        <tr><td><b>timed out</b> на шаге подключения</td><td>Пакеты не доходят: в форме указан не <b>2222</b>, либо в панели хостера TCP 2222 не открыт/открыт не для всех. Также бывает, если мастер пытаются кормить портом 22 — с сервера бота 22 недоступен и не будет.</td></tr>
+        <tr><td><b>unable to connect</b> к порту 2222</td><td>Дошло, но SSH на 2222 не слушает → шаг 3 не сделан (или сервер переустановили — тогда шаг 3 повторить заново, всё слетает).</td></tr>
+        <tr><td><b>is restarting</b>/логи пустые у <code>amnezia-awg2</code></td><td>Битый «заводской» контейнер из образа хостера. Решение: удалить контейнер и установить Amnezia через приложение (шаг 4) — или просто запустите мастер еще раз: он попробует авто-ремонт.</td></tr>
+        <tr><td>Мастер завершился✅, но VPN не пропускает трафик</td><td>Не открыт внешний UDP-порт в firewall-панели хостера (шаг 6) — самая частая пропущенная деталь.</td></tr>
+        <tr><td>Amnezia не встаёт и приложением тоже</td><td>Проверьте <code>ls /dev/net/tun</code> и <code>systemd-detect-virt</code>: файла нет или не <code>kvm</code> — тариф/хостер не годится, включите «TUN/TAP» у хостера либо берите другой VPS.</td></tr>
+        </tbody>
+    </table>
 </div>
 
 </div>
