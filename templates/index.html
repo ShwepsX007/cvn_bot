@@ -2,135 +2,232 @@
 <html lang="ru" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AmneziaWG VPN - Свободный интернет</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { 
-            background-color: #f4f7f6; 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
-        .hero-section { 
-            background: linear-gradient(135deg, #0d6efd, #0dcaf0); 
-            color: white; 
-            padding: 80px 0; 
-            border-radius: 0 0 40px 40px; 
-            margin-bottom: 50px; 
-            box-shadow: 0 10px 30px rgba(13, 110, 253, 0.2); 
-        }
-        .card-custom { 
-            border: none;
-            border-radius: 20px; 
-            box-shadow: 0 5px 20px rgba(0,0,0,0.05); 
-            transition: transform 0.2s, box-shadow 0.2s; 
-        }
-        .card-custom:hover { 
-            transform: translateY(-5px); 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-        }
-        .app-icon { font-size: 2.5rem; margin-bottom: 15px; }
-        .server-badge { font-size: 0.9rem; padding: 8px 12px; }
-    </style>
-    <link rel="stylesheet" href="/static/dark-theme.css">
+    <link rel="stylesheet" href="/static/app.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#171c2b">
+    <meta name="description" content="{{ og_description }}">
+    <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">
+    <link rel="canonical" href="{{ canonical_url }}">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="{{ og_title }}">
+    <meta property="og:description" content="{{ og_description }}">
+    <meta property="og:url" content="{{ canonical_url }}">
+    <meta property="og:image" content="{{ og_image }}">
+    <meta property="og:site_name" content="AmneziaWG VPN">
+    <meta name="twitter:card" content="summary_large_image">
+    <title>{{ page_title }}</title>
 </head>
 <body>
 
-    <!-- Главный блок -->
-    <div class="hero-section text-center">
-        <div class="container">
-            <h1 class="display-4 fw-bold mb-3">Твой личный VPN</h1>
-            <p class="lead mb-4">Надежный обход блокировок с протоколом AmneziaWG. Высокая скорость, никакой рекламы и полная анонимность.</p>
-            
-            <div class="d-flex justify-content-center gap-3 flex-wrap">
-                <a href="/free" class="btn btn-warning btn-lg px-4 fw-bold rounded-pill text-dark shadow-sm">
-                    🎁 Бесплатный VPN
-                </a>
-                <a href="https://t.me/AWGvpn_bot" class="btn btn-light btn-lg px-4 fw-bold text-primary rounded-pill shadow-sm">
-                    🤖 Перейти в Telegram-бот
-                </a>
-                <a href="/login" class="btn btn-outline-light btn-lg px-4 fw-bold rounded-pill">
-                    🔐 Личный кабинет
-                </a>
+<!-- Верхняя тонкая навигация как в octo: лого + пара ссылок + кнопка входа -->
+<div class="border-bottom" style="border-color: var(--oc-border) !important; background: var(--oc-bg);">
+<div class="container py-3 d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <a href="/" class="d-flex align-items-center gap-2 text-decoration-none" style="color: var(--oc-text);">
+        <span style="width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--oc-accent),var(--oc-accent-2));display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:.95rem;">A</span>
+        <span style="font-weight:600;font-size:1.05rem;letter-spacing:-0.01em;">AmneziaWG VPN</span>
+    </a>
+    <nav class="d-flex align-items-center gap-2 flex-wrap">
+        <a href="/free" class="btn btn-sm" style="color:var(--oc-text-dim);">🎁 Бесплатно</a>
+        <a href="/terms" class="btn btn-sm" style="color:var(--oc-text-dim);">Условия</a>
+        <a href="{{ tg_bot_url or 'https://t.me/' }}" target="_blank" rel="noopener" class="btn btn-sm" style="color:var(--oc-text-dim);">🤖 Бот</a>
+        <a href="/login" class="btn btn-primary btn-sm rounded-pill px-3">Войти</a>
+    </nav>
+</div>
+</div>
+
+<!-- Hero-блок: крупный заголовок + 3 кнопки -->
+<section class="hero-section">
+<div class="container py-5">
+    <div class="row align-items-center gy-4">
+        <div class="col-lg-8">
+            <span class="badge" style="background:rgba(45,123,255,.15);color:#93c5fd;font-weight:500;padding:.4rem .7rem;border-radius:8px;">⚡ Быстрый VPN · AmneziaWG протокол</span>
+            <h1 class="mt-3 mb-3" style="font-size:clamp(2rem,4vw,2.9rem); font-weight:700; line-height:1.15; letter-spacing:-0.02em;">
+                Свободный интернет<br>
+                <span style="background:linear-gradient(135deg,#2d7bff,#6c5ce7);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">без блокировок и тормозов</span>
+            </h1>
+            <p class="lead" style="color:var(--oc-text-dim); font-size:1.05rem; max-width:600px;">
+                Обходи любые блокировки на высокой скорости. Серверы в России и Европе,
+                подключение в 2 клика, бесплатный пробный период и бесплатный VPN на сайте.
+            </p>
+
+            <div class="d-flex gap-2 flex-wrap mt-4">
+                <a href="/free" class="btn btn-primary btn-lg rounded-pill px-4">🎁 Попробовать бесплатно</a>
+                <a href="{{ tg_bot_url or 'https://t.me/' }}" target="_blank" rel="noopener" class="btn btn-lg rounded-pill px-4" style="background:var(--oc-panel);color:var(--oc-text);border:1px solid var(--oc-border);">🤖 Открыть Telegram-бота</a>
+                <a href="/login" class="btn btn-lg rounded-pill px-4 btn-outline-secondary">🔐 Личный кабинет</a>
+            </div>
+
+            <div class="d-flex gap-4 flex-wrap mt-4" style="color:var(--oc-text-dim); font-size:.88rem;">
+                <div class="d-flex align-items-center gap-2"><span class="dot dot-green"></span>Все серверы онлайн</div>
+                <div>🔒 Никаких логов</div>
+                <div>⚡ До 1 Гбит/с</div>
+                <div>💳 Оплата картой и СБП</div>
+            </div>
+        </div>
+
+        <!-- Карточка справа: "до конца акции" / "подключение за минуту" — стиль octo-сводки -->
+        <div class="col-lg-4">
+            <div class="card p-4" style="border-radius:16px;">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="mb-0">Быстрый старт</h5>
+                    <span class="badge" style="background:rgba(34,197,94,.12);color:#86efac;">online</span>
+                </div>
+                <div class="stat-card p-0 mb-3" style="border:0;padding:0;">
+                    <div class="label">Пробный период</div>
+                    <div class="value" style="font-size:2rem; font-weight:700;">24 часа <span style="font-size:.9rem; color:var(--oc-text-dim); font-weight:500;">бесплатно</span></div>
+                    <div class="sub">Без карты и регистрации</div>
+                </div>
+                <div class="d-grid gap-2 mt-3">
+                    <a href="/free" class="btn btn-primary rounded-pill">Получить конфиг сейчас</a>
+                    <a href="/login" class="btn rounded-pill" style="background:var(--oc-bg-2); color:var(--oc-text); border:1px solid var(--oc-border);">У меня уже есть подписка</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</section>
+
+<!-- Приложения -->
+<div class="container pb-4">
+    <div class="d-flex justify-content-between align-items-end flex-wrap gap-2 mb-3">
+        <div>
+            <h2 class="mb-1">Скачать приложение</h2>
+            <div class="small" style="color:var(--oc-text-dim);">Установите официальный клиент AmneziaWG на ваше устройство</div>
+        </div>
+    </div>
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div class="card p-4 h-100" style="border-radius:14px;">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span style="font-size:1.4rem;">📱</span>
+                    <h5 class="mb-0">Android</h5>
+                </div>
+                <div class="small" style="color:var(--oc-text-dim);">Google Play · APK с GitHub</div>
+                <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" target="_blank" rel="noopener" class="btn btn-outline-primary mt-3 rounded-pill" style="border-radius:9px;">Google Play →</a>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card p-4 h-100" style="border-radius:14px;">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span style="font-size:1.4rem;">🍏</span>
+                    <h5 class="mb-0">iOS / macOS</h5>
+                </div>
+                <div class="small" style="color:var(--oc-text-dim);">App Store · TestFlight</div>
+                <a href="https://apps.apple.com/us/app/amneziawg/id6478942365" target="_blank" rel="noopener" class="btn btn-outline-primary mt-3 rounded-pill" style="border-radius:9px;">App Store →</a>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card p-4 h-100" style="border-radius:14px;">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span style="font-size:1.4rem;">💻</span>
+                    <h5 class="mb-0">Windows / Linux</h5>
+                </div>
+                <div class="small" style="color:var(--oc-text-dim);">Официальные клиенты с GitHub</div>
+                <a href="https://github.com/amnezia-vpn/amneziawg-windows-client/releases" target="_blank" rel="noopener" class="btn btn-outline-primary mt-3 rounded-pill" style="border-radius:9px;">Скачать →</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Статус серверов (плитка как в octo "Общие показатели" + список серверов) -->
+<div class="container pb-4">
+    <div class="row g-3 mb-3">
+        <div class="col-md-3 col-6">
+            <div class="stat-card">
+                <div class="label">Серверов онлайн</div>
+                <div class="value">{{ servers|length }}</div>
+                <div class="sub"><span class="dot dot-green"></span>работают стабильно</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="stat-card">
+                <div class="label">Бесплатных мест</div>
+                <div class="value">{{ servers | sum(attribute='free_slots') }}</div>
+                <div class="sub">из всех доступных</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="stat-card">
+                <div class="label">Пробный период</div>
+                <div class="value">{{ trial_hours or '24' }}ч</div>
+                <div class="sub">без карты</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-6">
+            <div class="stat-card">
+                <div class="label">Протокол</div>
+                <div class="value" style="font-size:1.1rem;">AmneziaWG</div>
+                <div class="sub">обфускация трафика</div>
             </div>
         </div>
     </div>
 
-    <div class="container pb-5">
-        <!-- Ссылки на приложения -->
-        <h3 class="text-center fw-bold mb-4">Скачать приложение AmneziaWG</h3>
-        <div class="row text-center mb-5 justify-content-center g-4">
-            <div class="col-md-4">
-                <div class="card card-custom p-4 h-100 bg-white">
-                    <div class="app-icon">📱</div>
-                    <h5 class="fw-bold">Android</h5>
-                    <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" class="btn btn-outline-primary mt-auto rounded-pill" target="_blank">Google Play</a>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card card-custom p-4 h-100 bg-white">
-                    <div class="app-icon">🍏</div>
-                    <h5 class="fw-bold">iOS</h5>
-                    <a href="https://apps.apple.com/us/app/amneziawg/id6478942365" class="btn btn-outline-primary mt-auto rounded-pill" target="_blank">App Store</a>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card card-custom p-4 h-100 bg-white">
-                    <div class="app-icon">💻</div>
-                    <h5 class="fw-bold">Windows</h5>
-                    <a href="https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1" class="btn btn-outline-primary mt-auto rounded-pill" target="_blank">Скачать .exe</a>
-                </div>
-            </div>
+    <div class="card p-4" style="border-radius:16px;">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h5 class="mb-0">🌍 Статус серверов</h5>
+            <a href="/free" class="btn btn-sm rounded-pill btn-primary">Попробовать бесплатно</a>
         </div>
 
-        <!-- Статус серверов -->
-        <h3 class="text-center fw-bold mb-4">🌍 Статус наших серверов</h3>
-        <div class="row justify-content-center">
-            <div class="col-lg-8">
-                {% if servers %}
-                    {% for server in servers %}
-                    <div class="card card-custom mb-3 p-4 bg-white border-start border-success border-4">
-                        <div class="row align-items-center">
-                            <div class="col-sm-8">
-                                <h5 class="fw-bold mb-1">{{ server.name }}</h5>
-                                <p class="mb-0 text-muted small">Доступно мест: <b>{{ server.free_slots }}</b></p>
-                            </div>
-                            <div class="col-sm-4 text-sm-end mt-3 mt-sm-0">
-                                {% if server.free_slots > 0 %}
-                                    <span class="badge bg-success bg-opacity-10 text-success server-badge rounded-pill border border-success">Онлайн</span>
-                                {% else %}
-                                    <span class="badge bg-danger bg-opacity-10 text-danger server-badge rounded-pill border border-danger">Мест нет</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
+        {% if servers %}
+        {% for server in servers %}
+        <div class="server-row">
+            <div>
+                <div class="sname">
+                    {% if 'RUS' in server.name.upper() %}🇷🇺{% else %}🌍{% endif %} {{ server.name }}
+                </div>
+                <div class="smeta">Свободных мест: <b style="color:var(--oc-text);">{{ server.free_slots }}</b></div>
+            </div>
+            <div>
+                {% if server.free_slots > 0 %}
+                    <span class="badge" style="background:rgba(34,197,94,.12); color:#86efac; padding:.4em .8em; border-radius:8px;"><span class="dot dot-green"></span>Онлайн</span>
                 {% else %}
-                    <div class="alert alert-warning text-center rounded-3 shadow-sm">Нет доступных серверов.</div>
+                    <span class="badge" style="background:rgba(239,68,68,.1); color:#fca5a5; padding:.4em .8em; border-radius:8px;"><span class="dot dot-red"></span>Мест нет</span>
                 {% endif %}
             </div>
         </div>
+        {% endfor %}
+        {% else %}
+        <div class="alert alert-warning rounded-3">Серверы временно недоступны.</div>
+        {% endif %}
+    </div>
+</div>
 
-        <!-- Рекламный баннер: админ может заменить через Настройки → site_banner_html.
-             Пока поле пустое — показываем стандартный Amnezia Premium. -->
-        <div class="row justify-content-center mt-4">
-            <div class="col-lg-8">
-                {% if site_banner_html %}
-                    {{ site_banner_html|safe }}
-                {% else %}
-                    <a href="https://amnezia.org/premium?arf=6VBU1RPKQZ2GYY9J" target="_blank" rel="noopener sponsored" class="d-block card-custom overflow-hidden">
-                        <img src="/static/amnezia_premium_banner.png" alt="Amnezia Premium" class="img-fluid w-100" style="display:block;">
-                    </a>
-                {% endif %}
-            </div>
+<!-- Рекламный блок (настраивается в админке) -->
+<div class="container pb-5">
+    {% if site_banner_html %}
+        {{ site_banner_html|safe }}
+    {% else %}
+    <div class="card p-4 d-flex flex-wrap align-items-center justify-content-between gap-3"
+         style="border-radius:16px; background: linear-gradient(135deg,rgba(45,123,255,.1),rgba(108,92,231,.12)); border:1px solid rgba(45,123,255,.22);">
+        <div>
+            <div class="small" style="color:#93c5fd; font-weight:600; letter-spacing:.03em;">РЕКОМЕНДУЕМ</div>
+            <h5 class="mb-1 mt-1">Amnezia Premium — официальный тариф от разработчиков</h5>
+            <div class="small" style="color:var(--oc-text-dim);">Максимальная скорость и встроенные функции обфускации.</div>
+        </div>
+        <a href="https://amnezia.org/premium?arf=6VBU1RPKQZ2GYY9J" target="_blank" rel="noopener sponsored" class="btn btn-primary rounded-pill px-3">Подробнее →</a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Footer -->
+<footer class="site-footer">
+    <div class="container d-flex justify-content-between flex-wrap gap-2">
+        <div>© {{ None and '' }}2026 AmneziaWG VPN · Свободный интернет без блокировок</div>
+        <div class="d-flex gap-3">
+            <a href="/terms">Соглашение</a>
+            <a href="/free">Бесплатный VPN</a>
+            <a href="/login">Кабинет</a>
         </div>
     </div>
+</footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/cookie-consent.js"></script>
-    {% if analytics_html %}{{ analytics_html|safe }}{% endif %}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/static/cookie-consent.js"></script>
+{% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

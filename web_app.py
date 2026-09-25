@@ -91,32 +91,53 @@ MAX_RECEIPT_BYTES = 10 * 1024 * 1024
 ALLOWED_RECEIPT_TYPES = ("image/", "application/pdf")
 
 # Глобальные переменные для всех шаблонов (баннер и код аналитики редактируются в админке)
-def _site_globals() -> dict:
+def _site_globals(request: Request = None) -> dict:
     site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+    path = request.url.path if request else "/"
+    # Канонический URL (без query)
+    canonical = site_url + path
+    # OG-описание и заголовок по умолчанию — переопределяются в ручках через context
+    title_suffix = "AmneziaWG VPN — быстрый и свободный интернет"
     return {
         "site_url": site_url,
+        "canonical_url": canonical,
+        "og_title": title_suffix,
+        "og_description": "Быстрый VPN с протоколом AmneziaWG: обход блокировок, бесплатный пробный период, серверы в России и мире, оплата картой и вручную.",
+        "og_image": f"{site_url}/static/apple-touch-icon.png",
+        "page_title": title_suffix,
         "site_banner_html": bot_db.get_setting("site_banner_html") or "",
         "analytics_html": bot_db.get_setting("analytics_html") or "",
         "admin_contact": bot_db.get_setting("admin_contact") or "@your_telegram_username",
     }
 
 # Подмешиваем глобальный контекст в каждый TemplateResponse автоматически,
-# чтобы не передавать banner/analytics руками в каждой ручке.
+# чтобы не передавать banner/analytics/SEO-мета руками в каждой ручке.
 from starlette.requests import Request as _StarletteRequest  # noqa: E402
 _orig_template_response = templates.TemplateResponse
 
 def _template_response(*args, **kwargs):
-    # поддержка и нового (request, name, context) и старого (name, context) API Starlette
+    request = None
+    context = {}
+    # Поддержка обоих стилей вызова:
+    #   TemplateResponse(request, name, context)
+    #   TemplateResponse(request=request, name=..., context=...)
     if args and isinstance(args[0], _StarletteRequest):
-        # _orig_template_response(request, name, context=...)
-        ctx = kwargs.get("context", {})
-        for k, v in _site_globals().items():
-            ctx.setdefault(k, v)
-        kwargs["context"] = ctx
-    elif len(args) >= 3 and isinstance(args[2], dict):
-        ctx = args[2]
-        for k, v in _site_globals().items():
-            ctx.setdefault(k, v)
+        request = args[0]
+        if len(args) >= 3 and isinstance(args[2], dict):
+            context = args[2]
+            args = (args[0], args[1], context)
+        else:
+            context = kwargs.get("context", {})
+            kwargs["context"] = context
+    else:
+        request = kwargs.get("request")
+        context = kwargs.get("context", {}) or {}
+        kwargs["context"] = context
+    g = _site_globals(request)
+    for k, v in g.items():
+        context.setdefault(k, v)
+    if request is not None:
+        context.setdefault("request", request)
     return _orig_template_response(*args, **kwargs)
 templates.TemplateResponse = _template_response  # type: ignore[assignment]
 
@@ -254,7 +275,7 @@ async def shutdown_event():
 async def read_root(request: Request):
     active_servers = bot_db.get_active_servers() or []
     servers = []
-    
+
     for s_id, ip, port, name, limit in active_servers:
         paid_count = bot_db.count_paid_users_on_server(s_id) or 0
         free_slots = limit - paid_count
@@ -262,10 +283,29 @@ async def read_root(request: Request):
             "id": s_id, "name": name, "free_slots": free_slots if free_slots > 0 else 0
         })
 
+    # Получаем username бота для жёсткой ссылки в обход get_me() на случай Unauthorized.
+    bot_username = None
+    try:
+        if BOT_USERNAME:
+            bot_username = BOT_USERNAME
+        else:
+            me = await bot.get_me()
+            bot_username = me.username
+    except Exception:
+        bot_username = None
+    tg_bot_url = f"https://t.me/{bot_username}" if bot_username else "https://t.me/"
+
     return templates.TemplateResponse(
-        request=request, 
-        name="index.html", 
-        context={"request": request, "servers": servers}
+        request=request,
+        name="index.html",
+        context={
+            "request": request,
+            "servers": servers,
+            "tg_bot_url": tg_bot_url,
+            "page_title": "AmneziaWG VPN — быстрый и свободный интернет без блокировок",
+            "og_title": "AmneziaWG VPN — быстрый и свободный интернет",
+            "og_description": "Обходите любые блокировки на высокой скорости с AmneziaWG. Пробный период 24 часа, бесплатный VPN на сайте, оплата картой или вручную. Серверы в России и Европе.",
+        }
     )
 
 def _current_tg_id(request: Request):
@@ -1330,6 +1370,71 @@ async def platega_webhook(request: Request):
             pass
 
     return {"ok": True}
+
+
+# ====================== SEO: robots.txt / sitemap.xml / healthz ======================
+
+@app.get("/robots.txt", response_class=Response)
+async def robots_txt():
+    site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /admin/web/\n"
+        "Disallow: /web/\n"
+        "Disallow: /webhook/\n"
+        "Disallow: /download/\n"
+        "Disallow: /qr/\n"
+        "Disallow: /free/download/\n"
+        "Disallow: /free/qr/\n"
+        "Disallow: /auth/\n"
+        "Disallow: /login\n"
+        "Disallow: /dashboard\n"
+        "Disallow: /cabinet\n"
+        f"Sitemap: {site_url}/sitemap.xml\n"
+    )
+    return Response(content=body, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/sitemap.xml", response_class=Response)
+async def sitemap_xml():
+    site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+    now = datetime.utcnow().strftime("%Y-%m-%d")
+    urls = [
+        ("",     "1.0", "daily"),
+        ("/free","0.9", "daily"),
+        ("/terms","0.5","monthly"),
+        ("/login","0.4","weekly"),
+    ]
+    parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for path, prio, freq in urls:
+        parts.append(
+            "  <url>"
+            f"<loc>{site_url}{path}</loc>"
+            f"<lastmod>{now}</lastmod>"
+            f"<changefreq>{freq}</changefreq>"
+            f"<priority>{prio}</priority>"
+            "</url>"
+        )
+    parts.append("</urlset>")
+    return Response(content="\n".join(parts), media_type="application/xml; charset=utf-8")
+
+
+@app.get("/healthz")
+async def healthz():
+    """Простой health-check: 200 + статус бота/БД (для мониторинга и прокси)."""
+    bot_state = "ok"
+    try:
+        _ = bot.id
+    except Exception:
+        bot_state = "unavailable"
+    return {
+        "ok": True,
+        "bot": bot_state,
+        "servers": len(bot_db.get_active_servers()),
+    }
+
 
 @app.get("/api/captcha")
 async def get_captcha():

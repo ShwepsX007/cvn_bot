@@ -1,0 +1,410 @@
+/* =====================================================================
+   AmneziaWG VPN — Octo-style dark SaaS dashboard theme
+   Вдохновлён стилем octoclick: тёмно-синий уголь, округлые карточки 14px,
+   тонкие полупрозрачные границы, синий акцент #2D7BFF, системный шрифт.
+   Переопределяет Bootstrap на уровне CSS-переменных, чтобы все компоненты
+   (кнопки, формы, алерты, таблицы, навигация) автоматически подхватили стиль
+   без переписывания разметки.
+   ===================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* Фон / панели — по скриншоту octoclick */
+  --oc-bg:        #171c2b;
+  --oc-bg-2:      #1c2233;
+  --oc-panel:     #20273a;
+  --oc-panel-2:   #1a2030;
+  --oc-border:    rgba(255,255,255,0.06);
+  --oc-border-2:  rgba(255,255,255,0.09);
+
+  /* Текст */
+  --oc-text:      #e9ecf3;
+  --oc-text-dim:  #9aa3b8;
+  --oc-text-mut:  #6d7690;
+
+  /* Акцент (по скриншоту — ярко-синяя кнопка "Обновить") */
+  --oc-accent:    #2d7bff;
+  --oc-accent-h:  #438bff;
+  --oc-accent-2:  #6c5ce7;  /* фиолетовый для градиентов/иконок */
+  --oc-success:   #22c55e;
+  --oc-danger:    #ef4444;
+  --oc-warn:      #f59e0b;
+
+  /* Скругления и тени */
+  --oc-radius:    14px;
+  --oc-radius-sm: 10px;
+  --oc-shadow:    0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.18);
+
+  /* Bootstrap 5.3 dark overrides */
+  --bs-body-bg: var(--oc-bg);
+  --bs-body-color: var(--oc-text);
+  --bs-emphasis-color: var(--oc-text);
+  --bs-secondary-color: var(--oc-text-dim);
+  --bs-tertiary-color: var(--oc-text-mut);
+  --bs-border-color: var(--oc-border);
+  --bs-border-radius: var(--oc-radius-sm);
+  --bs-border-radius-lg: var(--oc-radius);
+  --bs-primary: var(--oc-accent);
+  --bs-primary-rgb: 45,123,255;
+  --bs-link-color: var(--oc-accent);
+  --bs-link-hover-color: var(--oc-accent-h);
+  --bs-success: var(--oc-success);
+  --bs-danger:  var(--oc-danger);
+  --bs-warning: var(--oc-warn);
+
+  --bs-dark: var(--oc-panel);
+  --bs-dark-rgb: 32,39,58;
+  --bs-light: #2a3248;
+  --bs-light-rgb: 42,50,72;
+
+  --bs-body-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Inter", sans-serif;
+  --bs-body-font-size: 14px;
+  --bs-body-line-height: 1.5;
+  --bs-headings-font-weight: 600;
+}
+
+* { box-sizing: border-box; }
+html, body { background: var(--oc-bg); color: var(--oc-text); min-height: 100%; }
+body {
+  font-family: var(--bs-body-font-family);
+  font-size: var(--bs-body-font-size);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: var(--oc-accent); text-decoration: none; }
+a:hover { color: var(--oc-accent-h); text-decoration: none; }
+
+h1,h2,h3,h4,h5,h6 { color: var(--oc-text); font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 1.55rem; }
+h2 { font-size: 1.30rem; }
+h3 { font-size: 1.12rem; }
+h4 { font-size: 1.02rem; }
+h5 { font-size: .92rem; text-transform: none; letter-spacing: 0; font-weight: 600; }
+
+.text-muted { color: var(--oc-text-dim) !important; }
+.small, small { color: var(--oc-text-dim); }
+hr { border-top: 1px solid var(--oc-border); opacity: 1; }
+
+/* ===== Cards ===== */
+.card, .card-custom, .modal-content, .login-card, .accordion-item, .offcanvas {
+  background: var(--oc-panel) !important;
+  border: 1px solid var(--oc-border) !important;
+  border-radius: var(--oc-radius) !important;
+  color: var(--oc-text);
+}
+.card, .card-custom { box-shadow: none; }
+.card-header { background: transparent; border-bottom: 1px solid var(--oc-border); }
+.card-footer { background: transparent; border-top: 1px solid var(--oc-border); }
+.card-custom { transition: border-color .15s ease, transform .15s ease; }
+.card-custom:hover { border-color: var(--oc-border-2) !important; transform: translateY(-2px); }
+.bg-white, .bg-light { background: var(--oc-panel) !important; color: var(--oc-text) !important; }
+
+/* ===== Buttons ===== */
+.btn {
+  border-radius: 9px;
+  font-weight: 500;
+  padding: .5rem 1rem;
+  font-size: .9rem;
+  border: 1px solid transparent;
+  transition: background .15s ease, border-color .15s ease, transform .05s ease;
+}
+.btn-lg { padding: .7rem 1.4rem; font-size: .98rem; border-radius: 11px; }
+.btn-sm { padding: .35rem .75rem; font-size: .82rem; border-radius: 8px; }
+
+.btn-primary {
+  background: var(--oc-accent) !important;
+  border-color: var(--oc-accent) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 12px rgba(45,123,255,.25);
+}
+.btn-primary:hover, .btn-primary:focus { background: var(--oc-accent-h) !important; border-color: var(--oc-accent-h) !important; }
+.btn-primary:active { transform: translateY(1px); }
+
+.btn-outline-light, .btn-outline-primary, .btn-outline-secondary {
+  background: transparent !important;
+  color: var(--oc-text-dim) !important;
+  border-color: var(--oc-border-2) !important;
+}
+.btn-outline-light:hover, .btn-outline-primary:hover, .btn-outline-secondary:hover {
+  background: rgba(255,255,255,.05) !important;
+  color: var(--oc-text) !important;
+  border-color: var(--oc-border-2) !important;
+}
+.btn-light {
+  background: var(--oc-panel-2) !important;
+  color: var(--oc-text) !important;
+  border-color: var(--oc-border) !important;
+}
+.btn-light:hover { background: #252d43 !important; }
+.btn-success { background: var(--oc-success); border-color: var(--oc-success); }
+.btn-danger  { background: var(--oc-danger);  border-color: var(--oc-danger); }
+.btn-warning { background: var(--oc-warn);    border-color: var(--oc-warn); color:#1a1a1a; }
+.btn-link { color: var(--oc-accent); text-decoration: none; }
+.btn-link:hover { color: var(--oc-accent-h); }
+
+/* ===== Pill group / tabs (как "Сегодня / Вчера / Неделя" в octo) ===== */
+.btn-group-pills { display: inline-flex; gap: 4px; background: transparent; padding: 0; flex-wrap: wrap; }
+.btn-group-pills .btn {
+  border-radius: 9px !important;
+  background: transparent;
+  color: var(--oc-text-dim);
+  border: 1px solid transparent;
+  padding: .42rem .9rem;
+  font-weight: 500;
+}
+.btn-group-pills .btn.active,
+.btn-group-pills .btn.active:hover {
+  background: var(--oc-accent) !important;
+  color: #fff !important;
+  border-color: var(--oc-accent) !important;
+}
+.btn-group-pills .btn:hover { background: rgba(255,255,255,.04); color: var(--oc-text); }
+
+.nav-pills .nav-link { color: var(--oc-text-dim); border-radius: 9px; }
+.nav-pills .nav-link.active {
+  background: var(--oc-accent) !important;
+  color: #fff !important;
+}
+.nav-pills .nav-link:hover:not(.active) { background: rgba(255,255,255,.04); color: var(--oc-text); }
+
+/* ===== Forms ===== */
+.form-control, .form-select {
+  background: var(--oc-bg-2);
+  border: 1px solid var(--oc-border);
+  color: var(--oc-text);
+  border-radius: 10px;
+  padding: .58rem .85rem;
+  font-size: .9rem;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.form-control:focus, .form-select:focus {
+  background: var(--oc-bg-2);
+  color: var(--oc-text);
+  border-color: var(--oc-accent);
+  box-shadow: 0 0 0 3px rgba(45,123,255,.15);
+  outline: none;
+}
+.form-control::placeholder { color: var(--oc-text-mut); }
+.form-control-plaintext { color: var(--oc-text); }
+.form-label { color: var(--oc-text-dim); font-weight: 500; font-size: .84rem; margin-bottom: .3rem; }
+.input-group-text {
+  background: var(--oc-bg-2); border: 1px solid var(--oc-border); color: var(--oc-text-dim);
+}
+.form-check-input {
+  background-color: var(--oc-bg-2);
+  border-color: var(--oc-border-2);
+}
+.form-check-input:checked { background-color: var(--oc-accent); border-color: var(--oc-accent); }
+
+/* ===== Alerts ===== */
+.alert {
+  border: 1px solid transparent;
+  border-radius: var(--oc-radius-sm);
+  padding: .85rem 1rem;
+}
+.alert-success { background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.25); color: #86efac; }
+.alert-danger  { background: rgba(239,68,68,.1);  border-color: rgba(239,68,68,.25);  color: #fca5a5; }
+.alert-warning { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.25); color: #fcd34d; }
+.alert-info    { background: rgba(45,123,255,.1); border-color: rgba(45,123,255,.25); color: #93c5fd; }
+
+/* ===== Badges ===== */
+.badge { font-weight: 500; padding: .35em .65em; border-radius: 7px; font-size: .78rem; }
+.badge.rounded-pill { border-radius: 999px; }
+
+/* ===== Tables ===== */
+.table { --bs-table-color: var(--oc-text); --bs-table-bg: transparent; --bs-table-border-color: var(--oc-border); color: var(--oc-text); }
+.table thead th { color: var(--oc-text-dim); font-weight: 500; font-size: .82rem; text-transform: none; border-bottom-width: 1px; letter-spacing: 0; }
+.table-hover tbody tr:hover { background: rgba(255,255,255,.025); }
+.table td, .table th { vertical-align: middle; border-color: var(--oc-border); padding: .7rem .8rem; }
+
+/* ===== Code / pre ===== */
+code { color: #93c5fd; background: rgba(45,123,255,.08); padding: .1em .4em; border-radius: 5px; font-size: .85em; }
+pre {
+  background: var(--oc-bg-2) !important;
+  border: 1px solid var(--oc-border);
+  border-radius: 10px;
+  color: var(--oc-text);
+  padding: .9rem 1rem;
+  font-size: .82rem;
+  overflow: auto;
+}
+.cfg-pre { max-height: 340px; }
+
+/* ===== Modal ===== */
+.modal-content { box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.modal-header, .modal-footer { border-color: var(--oc-border); }
+.btn-close { filter: invert(1) grayscale(100%) brightness(1.8); opacity: .8; }
+.btn-close:hover { opacity: 1; }
+
+/* ===== Sidebar/topbar (admin + marketing pages) ===== */
+.topbar {
+  background: var(--oc-bg-2) !important;
+  border-bottom: 1px solid var(--oc-border);
+  box-shadow: none !important;
+  color: var(--oc-text);
+  padding: 14px 0 !important;
+  border-radius: 0 !important;
+  margin-bottom: 24px !important;
+}
+.hero-section {
+  background: radial-gradient(1200px 400px at 20% 0%, rgba(45,123,255,.18), transparent 60%),
+              radial-gradient(900px 400px at 100% 0%, rgba(108,92,231,.18), transparent 60%),
+              var(--oc-bg-2) !important;
+  color: var(--oc-text);
+  padding: 70px 0 !important;
+  border-radius: 0 0 var(--oc-radius) var(--oc-radius) !important;
+  margin-bottom: 40px !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid var(--oc-border) !important;
+}
+.hero-section h1 {
+  background: linear-gradient(180deg, #ffffff, #b9c5e2);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ===== Stat cards ("Доход / Показы / Клики" как в octo) ===== */
+.stat-card {
+  background: var(--oc-panel);
+  border: 1px solid var(--oc-border);
+  border-radius: var(--oc-radius);
+  padding: 18px 20px;
+  height: 100%;
+}
+.stat-card .label { font-size: .82rem; color: var(--oc-text-dim); text-transform: none; letter-spacing: 0; }
+.stat-card .value { font-size: 1.6rem; font-weight: 600; color: var(--oc-text); margin-top: 4px; letter-spacing: -0.02em; }
+.stat-card .sub { font-size: .8rem; color: var(--oc-text-mut); margin-top: 6px; }
+.stat-card .sub .up { color: var(--oc-success); }
+.stat-card .sub .down { color: var(--oc-danger); }
+
+/* ===== Server-list row ===== */
+.server-row {
+  background: var(--oc-panel);
+  border: 1px solid var(--oc-border);
+  border-radius: var(--oc-radius-sm);
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  transition: border-color .15s ease;
+}
+.server-row:hover { border-color: var(--oc-border-2); }
+.server-row .sname { font-weight: 600; color: var(--oc-text); }
+.server-row .smeta { font-size: .8rem; color: var(--oc-text-dim); margin-top: 2px; }
+
+/* Status dots */
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.dot-green { background: var(--oc-success); box-shadow: 0 0 10px rgba(34,197,94,.6); }
+.dot-red   { background: var(--oc-danger); }
+.dot-gray  { background: var(--oc-text-mut); }
+
+/* ===== QR image area ===== */
+.qr-wrap {
+  background: #fff;
+  padding: 14px;
+  border-radius: var(--oc-radius);
+  display: inline-block;
+  border: 1px solid var(--oc-border);
+}
+.qr-img {
+  background: #fff;
+  padding: 10px;
+  border-radius: 10px;
+}
+.qr-wrap img { display: block; max-width: 100%; }
+
+/* ===== Avatars (для админки/топов) ===== */
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--oc-accent), var(--oc-accent-2));
+  color: #fff; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: .85rem;
+  flex-shrink: 0;
+}
+.avatar.c1 { background: linear-gradient(135deg,#fbbf24,#f59e0b); color:#1a1a1a; }
+.avatar.c2 { background: linear-gradient(135deg,#e5e7eb,#9ca3af); color:#1a1a1a; }
+.avatar.c3 { background: linear-gradient(135deg,#22c55e,#16a34a); }
+.avatar.c4 { background: linear-gradient(135deg,#a855f7,#7c3aed); }
+.avatar.c5 { background: linear-gradient(135deg,#ec4899,#be185d); }
+.avatar.c6 { background: linear-gradient(135deg,#2d7bff,#1e5bd3); }
+.avatar.c7 { background: linear-gradient(135deg,#f472b6,#db2777); }
+
+.total-row {
+  background: rgba(255,255,255,.02);
+  border-top: 1px solid var(--oc-border);
+  font-weight: 600;
+}
+
+/* ===== Footer ===== */
+.site-footer {
+  border-top: 1px solid var(--oc-border);
+  padding: 22px 0;
+  margin-top: 60px;
+  color: var(--oc-text-mut);
+  font-size: .82rem;
+}
+.site-footer a { color: var(--oc-text-dim); }
+.site-footer a:hover { color: var(--oc-text); }
+
+/* ===== Cookie consent ===== */
+.cookie-consent {
+  position: fixed; left: 16px; right: 16px; bottom: 16px;
+  background: var(--oc-panel); border: 1px solid var(--oc-border-2);
+  color: var(--oc-text); padding: 14px 18px;
+  border-radius: var(--oc-radius); z-index: 999;
+  box-shadow: 0 10px 30px rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+}
+.cookie-consent button {
+  background: var(--oc-accent); color: #fff; border: 0; border-radius: 9px;
+  padding: .45rem 1rem; cursor: pointer; font-weight: 500;
+}
+
+/* ===== Server cards (radio-list) ===== */
+.server-card {
+  background: var(--oc-panel-2);
+  border: 1px solid var(--oc-border);
+  border-radius: var(--oc-radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  transition: all .15s ease;
+  cursor: pointer;
+  color: var(--oc-text);
+}
+.server-card:hover { border-color: var(--oc-border-2); background: #1e2538; }
+.server-card.active-server { border-color: var(--oc-accent); background: rgba(45,123,255,.08); }
+.server-card small { color: var(--oc-text-dim); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.16); background-clip: padding-box; }
+
+.oc-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 1px solid var(--oc-border-2);
+  color: var(--oc-text-dim); padding: .42rem .8rem; border-radius: 9px;
+  font-size: .85rem; font-weight: 500;
+}
+.oc-chip:hover { color: var(--oc-text); background: rgba(255,255,255,.04); }
+.topbar h4 { font-weight: 600; letter-spacing: -0.01em; }
+
+/* Pagination minimal */
+.page-link { background: var(--oc-panel); border-color: var(--oc-border); color: var(--oc-text-dim); }
+.page-link:hover { background: var(--oc-panel-2); color: var(--oc-text); border-color: var(--oc-border-2); }
+.page-item.active .page-link { background: var(--oc-accent); border-color: var(--oc-accent); color:#fff;}
+
+/* Dropdown (в админке) */
+.dropdown-menu {
+  background: var(--oc-panel); border: 1px solid var(--oc-border);
+  border-radius: var(--oc-radius-sm);
+}
+.dropdown-item { color: var(--oc-text); }
+.dropdown-item:hover { background: rgba(255,255,255,.05); color: var(--oc-text); }
