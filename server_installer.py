@@ -354,6 +354,83 @@ def update_container(ip, port, progress=None):
                 pass
 
 
+def _container_awg_ok(ssh):
+    """True, если контейнер существует и awg внутри отвечает."""
+    code, out, err = _run(ssh, f"docker exec {CONTAINER_NAME} awg show 2>&1 | head -5", timeout=30)
+    return code == 0 and ("interface" in out.lower() or "public key" in out.lower())
+
+
+def _tail_logs(ssh, n=12):
+    _, logs, _ = _run(ssh, f"docker logs --tail {n} {CONTAINER_NAME} 2>&1", timeout=60)
+    return (logs or "").strip()
+
+
+def _heal_existing_container(ssh, log_lines):
+    """Ремонт существующего битого контейнера (например, с фабрик-образа хостера):
+    1) мягкий restart; 2) если не ожил - пересоздаем с ТЕМИ ЖЕ volume и UDP-портом.
+    Ключи/пиры клиентов не теряются - они хранятся в volume, а не в образе.
+    Вызывает InstallError, если отремонтировать не получилось (в тексте - хвост логов)."""
+
+    if _container_awg_ok(ssh):
+        _log(log_lines, "✅ Контейнер жив, awg отвечает")
+        return
+
+    _, st, _ = _run(ssh, f"docker inspect -f '{{{{.State.Status}}}}' {CONTAINER_NAME}", timeout=30)
+    _log(log_lines, f"⚠️ Контейнер не отвечает (status: {st.strip() or '?'}) - сначала мягкий перезапуск...")
+    _run(ssh, f"docker restart {CONTAINER_NAME}", timeout=90)
+    _run(ssh, "sleep 5", timeout=30)
+    if _container_awg_ok(ssh):
+        _log(log_lines, "✅ После рестарта контейнер ожил")
+        return
+
+    logs = _tail_logs(ssh)
+    _log(log_lines, "📜 Хвост логов контейнера (перед ремонтом):\n" + logs)
+    _log(log_lines, "🔧 Рестарт не помог - пересоздаю контейнер с СОХРАНЕНИЕМ данных (volume и UDP-порт прежние)...")
+
+    # Где у контейнера volume с конфигом
+    tmpl = '{{range .Mounts}}{{if eq .Destination "/opt/amnezia/awg"}}{{println .Source}}{{end}}{{end}}'
+    code, src, _ = _run(ssh, f"docker inspect -f '{tmpl}' {CONTAINER_NAME}", timeout=60)
+    src = src.strip().splitlines()[0] if code == 0 and src.strip() else ""
+    if not src:
+        src = AWG_CONF_DIR
+        _log(log_lines, "   не удалось определить старый volume - использую %s (старые конфиги могут быть потеряны)" % src)
+    else:
+        _log(log_lines, f"   сохраняю volume: {src}")
+
+    # Какой внешний UDP-порт был опубликован
+    tmpl = '{{with index .HostConfig.PortBindings "%d/udp"}}{{(index . 0).HostPort}}{{end}}' % AWG_LISTEN_IN_CONTAINER
+    code, hp, _ = _run(ssh, f"docker inspect -f '{tmpl}' {CONTAINER_NAME}", timeout=60)
+    host_port = hp.strip() if code == 0 else ""
+    if not host_port.isdigit():
+        raise InstallError(
+            "Ремонт не начат: не удалось определить внешний UDP-порт существующего контейнера.\n"
+            "Хвост логов контейнера:\n" + logs + "\nПришлите это на проверку.")
+    _log(log_lines, f"   сохраняю UDP-порт: {host_port}")
+
+    _log(log_lines, "📥 Подтягиваю образ (%s)..." % AWG_IMAGE)
+    _must(ssh, f"docker pull {AWG_IMAGE}", "docker pull", log_lines, timeout=900)
+
+    run_cmd = (
+        f"docker rm -f {CONTAINER_NAME} >/dev/null 2>&1; "
+        f"docker run -d --name {CONTAINER_NAME} --restart always "
+        f"--cap-add NET_ADMIN --device /dev/net/tun "
+        f"-p {host_port}:{AWG_LISTEN_IN_CONTAINER}/udp "
+        f"-v {src}:/opt/amnezia/awg "
+        f"{AWG_IMAGE}"
+    )
+    _must(ssh, run_cmd, "ремонт: пересоздание контейнера", log_lines, timeout=300)
+    _run(ssh, "sleep 4", timeout=30)
+
+    if not _container_awg_ok(ssh):
+        logs2 = _tail_logs(ssh)
+        raise InstallError(
+            "Ремонт не удался - контейнер все еще не поднимается. Хвост логов:\n" + logs2 + "\n"
+            "Частые причины: VPS без TUN (OpenVZ/LXC вместо KVM) - на ноде выполните: "
+            "ls /dev/net/tun ; если файла нет - просите хостера включить TUN/TAP или берите KVM-VPS. "
+            "Пришлите этот текст на проверку.")
+    _log(log_lines, "✅ Ремонт удался - контейнер работает, клиентские ключи сохранены")
+
+
 def install_new_server(ip, port, password, server_name, progress=None):
     """Полный цикл установки ноды. progress - функция(кусок лога). Возвращает dict:
     {ok, steps (лог), udp_port, error}."""
@@ -395,7 +472,8 @@ def install_new_server(ip, port, password, server_name, progress=None):
         # --- Шаг 2: контейнер AmneziaWG ---
         code, out, err = _run(ssh, f"docker ps -a --format '{{{{.Names}}}}' 2>/dev/null | grep -x {CONTAINER_NAME}")
         if code == 0:
-            log(f"📦 Контейнер {CONTAINER_NAME} уже установлен - пропускаю установку AmneziaWG")
+            log(f"📦 Контейнер {CONTAINER_NAME} уже установлен - проверяю его здоровье...")
+            _heal_existing_container(ssh, log_lines)
             existing_port = _detect_udp_port(ssh, log_lines)
             if existing_port:
                 udp_port = existing_port
@@ -410,8 +488,10 @@ def install_new_server(ip, port, password, server_name, progress=None):
         log("🔍 Проверяю интерфейс AmneziaWG внутри контейнера...")
         code, out, err = _run(ssh, f"sleep 3; docker exec -i {CONTAINER_NAME} awg show 2>&1 | head -5", timeout=60)
         if "interface" not in out.lower() and "public key" not in out.lower():
+            logs = _tail_logs(ssh)
+            log("📜 Хвост логов контейнера:\n" + logs)
             raise InstallError(f"Контейнер {CONTAINER_NAME} есть, но awg не отвечает:\n{out}\n{err}\n"
-                               "Возможно, контейнер не стартовал - проверьте: docker logs amnezia-awg2")
+                               "Хвост логов контейнера выше в журнале - пришлите его на проверку.")
         log("✅ Интерфейс AmneziaWG работает")
 
         # --- Шаг 4: скрипты add/remove ---
