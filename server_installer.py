@@ -114,10 +114,54 @@ def _install_amnezia_container(ssh, udp_port, log_lines):
         _must(ssh, "curl -fsSL https://get.docker.com | sh", "установка docker", log_lines, timeout=600)
         _must(ssh, "systemctl enable --now docker", "запуск docker", log_lines)
     else:
-        _log(log_lines, "🐳 Docker уже установлен ✓")
+        _log(log_lines, "🐳 Docker CLI уже установлен ✓ - проверяю daemon...")
+
+    # Важный случай (встречается у хостеров): CLI docker установлен, но daemon ВЫКЛЮЧЕН -
+    # pull/exec тогда падают с "no such file /var/run/docker.sock".
+    code, out, err = _run(ssh, "docker info --format ok", timeout=60)
+    if code != 0:
+        _log(log_lines, "🐳 Daemon docker не отвечает - запускаю...")
+        _run(ssh, "systemctl unmask docker 2>/dev/null; systemctl enable --now docker", timeout=120)
+        code, out, err = _run(
+            ssh,
+            "for i in 1 2 3 4 5 6; do docker info --format ok 2>/dev/null && exit 0; sleep 5; done; exit 1",
+            timeout=120)
+        if code != 0:
+            _, st, _ = _run(ssh, "{ systemctl status docker --no-pager | tail -5; journalctl -u docker -n 5 --no-pager | tail -5; } 2>&1", timeout=60)
+            raise InstallError(
+                "docker daemon не стартует:\n" + str(st).strip() +
+                "\n\nИсправьте на ноде (обычно: systemctl start docker), пришлите это на проверку если непонятно.")
+        _log(log_lines, "🐳 Daemon запущен ✓")
+        # Если daemon был выключен, внешняя проверка контейнера могла идти «вслепую».
+        # Вдруг контейнер УЖЕ есть (ставили приложением)? Тогда ничего нельзя пересоздавать!
+        code2, _, _ = _run(ssh, f"docker ps -a --format '{{{{.Names}}}}' | grep -x {CONTAINER_NAME}")
+        if code2 == 0:
+            raise InstallError(
+                f"Daemon был выключен - я запустил его и обнаружил: контейнер {CONTAINER_NAME} "
+                "УЖЕ существует. Запустите мастер еще раз - он пойдет по короткой ветке "
+                "(ключ+скрипты), НЕ трогая установленный AmneziaWG.")
+    else:
+        _log(log_lines, "🐳 Daemon работает ✓")
 
     _log(log_lines, "📥 Загрузка образа AmneziaWG (может занять пару минут)...")
-    _must(ssh, f"docker pull {AWG_IMAGE}", "docker pull", log_lines, timeout=900)
+    code, out, err = _run(ssh, f"docker pull {AWG_IMAGE}", timeout=900)
+    if code != 0:
+        # Частый RU-случай: Docker Hub зарезан у хостера - пробуем через зеркала реестра.
+        _log(log_lines, "⚠️ Pull не получился - настраиваю зеркала реестра Docker и пробую еще раз...")
+        mirror_cmd = (
+            "mkdir -p /etc/docker && "
+            "cat > /etc/docker/daemon.json <<'DOCKERCFG'\n"
+            '{ "registry-mirrors": ["https://mirror.gcr.io", "https://dockerhub.timeweb.cloud", "https://docker.m.daocloud.io"] }\n'
+            "DOCKERCFG\n"
+            "systemctl restart docker"
+        )
+        _run(ssh, mirror_cmd, timeout=300)
+        code, out, err = _run(ssh, f"docker pull {AWG_IMAGE}", timeout=900)
+        if code != 0:
+            raise InstallError(
+                f"Не удалось скачать образ {AWG_IMAGE} (в т.ч. через зеркала):\n{(err or out).strip()}\n"
+                "Похоже, нода не может достучаться до реестров Docker - проверьте интернет на ноде "
+                "(curl -I https://mirror.gcr.io) либо тикет хостеру.")
 
     _must(ssh, f"mkdir -p {AWG_CONF_DIR}", "каталог конфигов", log_lines)
 
