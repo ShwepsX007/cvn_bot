@@ -30,6 +30,9 @@ ROOT_ADMIN_ID = int(ADMIN_ID)
 # Настройки, чьи значения не показываем целиком в списке и не требуем вводить заново
 SECRET_KEYS = ("mail_smtp_password", "mail_resend_key", "aipay_api_key", "platega_secret", "platega_merchant_id")
 
+# Ключи, чьи значения содержат HTML и должны редактироваться в <textarea> большого размера
+HTML_KEYS = ("manual_payment_details", "site_banner_html", "analytics_html")
+
 # Названия настроек для подписей в форме
 SETTING_LABELS = {
     "trial_hours": "Пробный период (часов)",
@@ -55,6 +58,8 @@ SETTING_LABELS = {
     "node_update_report": "Отчет автообновления (служебное)",
     "free_hours": "Бесплатный VPN: срок конфига (часов)",
     "free_remind_minutes": "Бесплатный VPN: напоминание в TG за (мин)",
+    "site_banner_html": "HTML рекламного баннера под основным контентом (пусто = стандартный блок Amnezia Premium)",
+    "analytics_html": "HTML-код аналитики/счётчика (вставляется перед </body> всех страниц)",
 }
 
 # Эти ключи не показываем в таблице настроек: container_autoupdate рисуется отдельным
@@ -483,13 +488,16 @@ async def admin_settings(request: Request):
         if key in HIDDEN_SETTING_KEYS:
             continue
         is_secret = key in SECRET_KEYS
+        is_html = key in HTML_KEYS
         rows.append({
             "key": key,
             "label": SETTING_LABELS.get(key, key),
             "value": "" if is_secret else (value or ""),
             "masked": f"•••{str(value)[-4:]}" if is_secret and value else "",
             "is_secret": is_secret,
-            "is_long": len(value or "") > 40 and not is_secret,
+            "is_html": is_html,
+            "is_long": (len(value or "") > 40 or is_html) and not is_secret,
+            "textarea_rows": 8 if is_html else 2,
         })
     return templates.TemplateResponse(request=request, name="admin_settings.html", context=_ctx(
         request, "settings", rows=rows, mail_status=mailer.describe(),

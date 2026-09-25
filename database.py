@@ -5,7 +5,16 @@ DB_NAME = "vpn_database.db"
 
 def get_conn():
     # Добавлен timeout для предотвращения ошибки "database is locked"
-    return sqlite3.connect(DB_NAME, timeout=10)
+    conn = sqlite3.connect(DB_NAME, timeout=10)
+    # WAL-журнал позволяет читателям не блокировать писателей (лучше параллелизм
+    # при вебхуках платежей и фоновых джобах на SQLite).
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+    except sqlite3.Error:
+        pass
+    return conn
 
 def init_db():
     conn = get_conn()
@@ -75,7 +84,24 @@ def init_db():
         ('node_update_report', ''),
         # Бесплатный VPN на сайте: срок конфига в часах и напоминание в TG за N минут
         ('free_hours', '3'),
-        ('free_remind_minutes', '30')
+        ('free_remind_minutes', '30'),
+        # Рекламный HTML-баннер, вставляемый внизу всех публичных страниц сайта.
+        # Пустая строка = «показывать стандартный баннер Amnezia Premium» (он уже в index.html).
+        ('site_banner_html', ''),
+        # HTML-код счётчика/аналитики (LiveInternet/Яндекс.Метрика и т.п.),
+        # вставляется перед закрывающим </body> на всех страницах сайта.
+        # По умолчанию — LiveInternet-счётчик (можно поменять/очистить в админке).
+        ('analytics_html',
+         '<!--LiveInternet counter--><a href="https://www.liveinternet.ru/click" '
+         'target="_blank"><img id="licnt882B" width="88" height="31" style="border:0" '
+         'title="LiveInternet: показано число просмотров за 24 часа, посетителей за 24 часа и за сегодня" '
+         'src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAEALAAAAAABAAEAAAIBTAA7" '
+         'alt=""/></a><script>(function(d,s){d.getElementById("licnt882B").src='
+         '"https://counter.yadro.ru/hit?t22.6;r"+escape(d.referrer)+'
+         '((typeof(s)=="undefined")?"":";s"+s.width+"*"+s.height+"*"+'
+         '(s.colorDepth?s.colorDepth:s.pixelDepth))+";u"+escape(d.URL)+'
+         '";h"+escape(d.title.substring(0,150))+";"+Math.random()})'
+         '(document,screen)</script><!--/LiveInternet-->')
     ]
     cursor.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", default_settings)
     

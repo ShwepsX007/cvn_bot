@@ -135,5 +135,8 @@
         });
     });
 </script>
+
+{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
+{% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

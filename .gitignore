@@ -1,0 +1,56 @@
+# ===== Секреты и локальная конфигурация =====
+config_tokens.py
+config_tokens.py.*
+.env
+.env.*
+*.env
+
+# Session secret (подпись cookie)
+.session_secret
+
+# Кэш SSH host keys VPN-нод (заполняется при первом подключении)
+.known_hosts
+
+# ===== Базы данных =====
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+ENV/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===== Логи =====
+*.log
+logs/
+nohup.out
+
+# ===== Uploads / runtime =====
+uploads/
+receipts/
+tmp/
+
+# ===== Архивные патчи (локальные) =====
+01a0d3b2-*.patch

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shlex
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -26,7 +27,10 @@ if not BOT_TOKEN:
     print("⛔ BOT_TOKEN не задан: создайте config_tokens.py (см. config_tokens.example.py) "
           "или переменную окружения BOT_TOKEN, иначе бот не запустится.")
 
-bot = Bot(token=BOT_TOKEN or "0:placeholder", default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+bot = Bot(
+    token=BOT_TOKEN or "0:placeholder",
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+)
 dp = Dispatcher()
 dp.include_router(admin_router)
 dp.include_router(user_router)
@@ -44,7 +48,8 @@ async def check_expiring_soon():
                 parse_mode="HTML"
             )
             db.mark_notified_3h(tg_id, server_id)
-        except Exception: pass
+        except Exception as _e:
+                print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
 
 async def check_expiring_1d():
     users = db.get_expiring_soon_users_1d()
@@ -58,7 +63,8 @@ async def check_expiring_1d():
                 parse_mode="HTML"
             )
             db.mark_notified_1d(tg_id, server_id)
-        except Exception: pass
+        except Exception as _e:
+                print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
 
 async def check_expiring_3d():
     users = db.get_expiring_soon_users_3d()
@@ -72,7 +78,8 @@ async def check_expiring_3d():
                 parse_mode="HTML"
             )
             db.mark_notified_3d(tg_id, server_id)
-        except Exception: pass
+        except Exception as _e:
+                print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
 
 # --- ОТКЛЮЧЕНИЕ ПРОСРОЧЕННЫХ ---
 async def check_expired_users():
@@ -81,17 +88,19 @@ async def check_expired_users():
         server = db.get_server_by_id(server_id)
         if server:
             ip, port, srv_name = server[0], server[1], server[2]
-            cmd = f"bash /root/remove_user.sh {username}"
+            cmd = f"bash /root/remove_user.sh {shlex.quote(username)}"
             result = await ssh.run_ssh_command(ip, port, cmd)
             
             if "Ошибка" not in result:
                 db.deactivate_user(tg_id, server_id)
                 try:
                     await bot.send_message(tg_id, f"⚠️ Срок действия вашей VPN-подписки (Сервер: <b>{srv_name}</b>) завершен. Конфигурация отключена.", parse_mode="HTML")
-                except Exception: pass
+                except Exception as _e:
+                    print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
                 try:
                     await bot.send_message(ADMIN_ID, f"🔴 <b>Подписка истекла!</b>\nПользователь <code>{tg_id}</code> был отключен от сервера {srv_name}.", parse_mode="HTML")
-                except Exception: pass
+                except Exception as _e:
+                    print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
             else:
                 print(f"❌ Ошибка отключения пользователя {username}: {result}")
 
@@ -143,8 +152,8 @@ async def autoupdate_node_containers():
         for aid in targets:
             try:
                 await bot.send_message(aid, msg, parse_mode="HTML")
-            except Exception:
-                pass
+            except Exception as _e:
+                    print(f"⚠️ Не удалось отправить отчёт админу {aid}: {_e}")
 
 # --- ОЧИСТКА МЕРТВЫХ ДУШ (>30 ДНЕЙ) ---
 async def clean_inactive_users():
@@ -154,7 +163,7 @@ async def clean_inactive_users():
             server = db.get_server_by_id(server_id)
             if server:
                 ip, port = server[0], server[1]
-                cmd = f"bash /root/remove_user.sh {username}"
+                cmd = f"bash /root/remove_user.sh {shlex.quote(username)}"
                 await ssh.run_ssh_command(ip, port, cmd)
             db.delete_user_completely(tg_id, server_id)
             print(f"🗑 Пользователь {username} удален за неактивность > 30 дней.")

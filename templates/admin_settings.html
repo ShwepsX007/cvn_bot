@@ -44,7 +44,14 @@
                     <td>
                         <form method="post" action="/admin/web/settings" class="d-flex gap-2">
                             <input type="hidden" name="key" value="{{ row.key }}">
-                            {% if row.is_long %}
+                            {% if row.is_html %}
+                                <textarea name="value" class="form-control form-control-sm font-monospace" rows="{{ row.textarea_rows }}" placeholder="<…> HTML-код будет вставлен как есть, без экранирования">{{ row.value }}</textarea>
+                                {% if row.key == 'site_banner_html' %}
+                                    <small class="text-muted d-block mt-1">Вставьте готовый HTML баннера (например, <code>&lt;a&gt;…&lt;img/&gt;…&lt;/a&gt;</code>). Пока поле пустое — на главной показывается стандартный блок Amnezia Premium.</small>
+                                {% elif row.key == 'analytics_html' %}
+                                    <small class="text-muted d-block mt-1">Сюда можно вставить код LiveInternet, Яндекс.Метрики, Google Analytics и т.п. — он будет подставлен перед закрывающим <code>&lt;/body&gt;</code> на всех страницах сайта.</small>
+                                {% endif %}
+                            {% elif row.is_long %}
                                 <textarea name="value" class="form-control form-control-sm" rows="2">{{ row.value }}</textarea>
                             {% else %}
                                 <input type="text" name="value" class="form-control form-control-sm"

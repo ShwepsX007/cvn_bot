@@ -1,5 +1,6 @@
 import os
 import uuid
+import shlex
 import random
 import secrets
 from datetime import datetime, timedelta
@@ -56,12 +57,69 @@ if os.path.exists(SESSION_SECRET_FILE):
         SESSION_SECRET = f.read().strip()
 else:
     SESSION_SECRET = secrets.token_hex(32)
-    with open(SESSION_SECRET_FILE, "w") as f:
-        f.write(SESSION_SECRET)
+    # Сразу создаём файл с безопасными правами (0600), чтобы секрет подписи cookie
+    # не был доступен другим пользователям на сервере.
+    import stat as _stat
+    fd = os.open(SESSION_SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(SESSION_SECRET)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    try:
+        os.chmod(SESSION_SECRET_FILE, _stat.S_IRUSR | _stat.S_IWUSR)
+    except OSError:
+        pass
 
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, session_cookie="vpn_session", max_age=30 * 24 * 3600)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    session_cookie="vpn_session",
+    max_age=30 * 24 * 3600,
+    https_only=True,     # не отсылать куку по plain HTTP (только HTTPS)
+    same_site="lax",     # базовая CSRF-защита
+)
 
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+# Ограничение на загрузку чека ручной оплаты (в байтах). 10 МБ достаточно
+# для фото скриншота и PDF, но защитит от забива памяти гигантскими файлами.
+MAX_RECEIPT_BYTES = 10 * 1024 * 1024
+ALLOWED_RECEIPT_TYPES = ("image/", "application/pdf")
+
+# Глобальные переменные для всех шаблонов (баннер и код аналитики редактируются в админке)
+def _site_globals() -> dict:
+    site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+    return {
+        "site_url": site_url,
+        "site_banner_html": bot_db.get_setting("site_banner_html") or "",
+        "analytics_html": bot_db.get_setting("analytics_html") or "",
+        "admin_contact": bot_db.get_setting("admin_contact") or "@your_telegram_username",
+    }
+
+# Подмешиваем глобальный контекст в каждый TemplateResponse автоматически,
+# чтобы не передавать banner/analytics руками в каждой ручке.
+from starlette.requests import Request as _StarletteRequest  # noqa: E402
+_orig_template_response = templates.TemplateResponse
+
+def _template_response(*args, **kwargs):
+    # поддержка и нового (request, name, context) и старого (name, context) API Starlette
+    if args and isinstance(args[0], _StarletteRequest):
+        # _orig_template_response(request, name, context=...)
+        ctx = kwargs.get("context", {})
+        for k, v in _site_globals().items():
+            ctx.setdefault(k, v)
+        kwargs["context"] = ctx
+    elif len(args) >= 3 and isinstance(args[2], dict):
+        ctx = args[2]
+        for k, v in _site_globals().items():
+            ctx.setdefault(k, v)
+    return _orig_template_response(*args, **kwargs)
+templates.TemplateResponse = _template_response  # type: ignore[assignment]
+
 CAPTCHA_STORE = {}
 
 scheduler = AsyncIOScheduler()
@@ -70,14 +128,14 @@ BOT_USERNAME = None
 
 async def create_amnezia_peer(ip: str, port: int) -> tuple[str, str]:
     peer_id = f"web_{uuid.uuid4().hex[:8]}"
-    cmd = f"bash /root/add_user.sh {peer_id}"
+    cmd = f"bash /root/add_user.sh {shlex.quote(peer_id)}"
     config_text = await ssh.run_ssh_command(ip, port, cmd)
     if not config_text or "Ошибка" in config_text:
         raise Exception(f"SSH Error: {config_text}")
     return config_text, peer_id
 
 async def delete_amnezia_peer(ip: str, port: int, peer_id: str):
-    cmd = f"bash /root/remove_user.sh {peer_id}"
+    cmd = f"bash /root/remove_user.sh {shlex.quote(peer_id)}"
     result = await ssh.run_ssh_command(ip, port, cmd)
     if "Ошибка" in result:
         raise Exception(f"Ошибка SSH при удалении: {result}")
@@ -219,8 +277,49 @@ def is_web_admin(tg_id) -> bool:
         return False
     return tg == int(ADMIN_ID) or bot_db.is_admin_user(tg)
 
+# Доверять заголовку X-Real-IP / X-Forwarded-For ТОЛЬКО от локального прокси (nginx).
+# По умолчанию ожидаем, что uvicorn слушает за nginx на 127.0.0.1 — иначе куки/сессии
+# и rate-limiter'ы можно обойти подделкой заголовка. Чтобы открыть доверие с других
+# прокси-подсетей (например, при облачном балансере), задайте TRUSTED_PROXIES=127.0.0.1,10.0.0.0/8.
+def _parse_trusted_proxies() -> list:
+    raw = os.environ.get("TRUSTED_PROXIES", "127.0.0.1,::1").strip()
+    if not raw:
+        return []
+    res = []
+    for item in raw.split(","):
+        item = item.strip()
+        if item:
+            res.append(item)
+    return res
+
+TRUSTED_PROXIES = _parse_trusted_proxies()
+
+def _host_in_trusted(host: str) -> bool:
+    # 127.0.0.1 / ::1 и явно перечисленные в TRUSTED_PROXIES
+    if host in TRUSTED_PROXIES:
+        return True
+    # uvicorn через unix-сокет или Starlette TestClient (host == "testclient")
+    if not host or host.startswith("unix:") or host == "testclient":
+        return True
+    # Простая поддержка CIDR-подсетей из TRUSTED_PROXIES (для облачных LB)
+    for net in TRUSTED_PROXIES:
+        if "/" in net:
+            from ipaddress import ip_address, ip_network
+            try:
+                if ip_address(host) in ip_network(net, strict=False):
+                    return True
+            except ValueError:
+                continue
+    return False
+
 def _client_host(request: Request):
-    return request.headers.get("X-Real-IP") or (request.client.host if request.client else None)
+    """Определение IP клиента. X-Real-IP берём только если запрос пришёл от доверенного прокси."""
+    direct = request.client.host if request.client else None
+    if not direct:
+        direct = "0.0.0.0"
+    if _host_in_trusted(direct):
+        return request.headers.get("X-Real-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or direct
+    return direct
 
 _PW_MESSAGES = {
     "short": "Пароль должен быть не короче 8 символов.",
@@ -231,15 +330,27 @@ _PW_MESSAGES = {
 def _pw_message(code: str) -> str:
     return _PW_MESSAGES.get(code, "Пароль не подходит.")
 
+_CAPTCHA_MAX_ATTEMPTS = 3
+
 def _check_captcha(captcha_id: str, captcha_answer: str) -> bool:
-    """Разовая математическая капча (тот же механизм, что у пробного доступа)."""
-    saved = CAPTCHA_STORE.pop(captcha_id, None)
+    """Разовая математическая капча. С ограничением попыток на один ID: после
+    _CAPTCHA_MAX_ATTEMPTS неверных ответов капча сжигается - нужно обновить."""
+    saved = CAPTCHA_STORE.get(captcha_id)
     if not saved or saved["expires"] < datetime.utcnow():
+        CAPTCHA_STORE.pop(captcha_id, None)
         return False
     try:
-        return int(captcha_answer) == saved["answer"]
+        ok = int(captcha_answer) == saved["answer"]
     except (ValueError, TypeError):
-        return False
+        ok = False
+    if ok:
+        CAPTCHA_STORE.pop(captcha_id, None)
+        return True
+    # Считаем неудачные попытки, чтобы не позволить перебрать ответ за доли секунды.
+    saved["fails"] = saved.get("fails", 0) + 1
+    if saved["fails"] >= _CAPTCHA_MAX_ATTEMPTS:
+        CAPTCHA_STORE.pop(captcha_id, None)
+    return False
 
 @app.get("/terms")
 async def terms_page(request: Request):
@@ -568,7 +679,9 @@ async def forgot_post(request: Request):
     form = await request.form()
     email = emailauth.normalize_email(str(form.get("email") or ""))
     host = _client_host(request) or "unknown"
-    if emailauth.REGISTER_LIMITER.allow(host):
+    # Сброс пароля — тот же класс операции, что и ссылка привязки (письмо со ссылкой).
+    # Используем тот же лимитер, чтобы нельзя было заспамить ящик восстановления.
+    if emailauth.MAIL_LINK_LIMITER.allow(host):
         acc = bot_db.get_email_account(email) if email else None
         if acc and acc[2]:
             token = bot_db.create_email_token(email, "reset", acc[3], 3600)
@@ -887,6 +1000,21 @@ async def web_upload_receipt(request: Request, server_id: int = Form(...), perio
     if not server:
         raise HTTPException(status_code=404, detail="Сервер не найден")
 
+    # Валидация загружаемого чека: размер и тип файла (белый список).
+    if file.size is not None and file.size > MAX_RECEIPT_BYTES:
+        raise HTTPException(status_code=413, detail=f"Файл слишком большой (максимум {MAX_RECEIPT_BYTES // (1024*1024)} МБ). Пришлите сжатое фото в JPEG/PNG.")
+    ctype = (file.content_type or "").lower()
+    if not any(ctype.startswith(prefix) for prefix in ALLOWED_RECEIPT_TYPES):
+        raise HTTPException(status_code=400, detail="Недопустимый тип файла. Принимаются изображения (jpg/png/webp) или PDF.")
+
+    # Читаем с жёстким лимитом, чтобы клиент не забил память процесса.
+    try:
+        file_bytes = await file.read(MAX_RECEIPT_BYTES + 1)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Не удалось прочитать файл: {e}")
+    if len(file_bytes) > MAX_RECEIPT_BYTES:
+        raise HTTPException(status_code=413, detail=f"Файл слишком большой (максимум {MAX_RECEIPT_BYTES // (1024*1024)} МБ).")
+
     amount = get_price_for_period(server, period)
     order_id = bot_db.create_manual_order(tg_id, server_id, period, amount)
 
@@ -907,8 +1035,11 @@ async def web_upload_receipt(request: Request, server_id: int = Form(...), perio
     builder.add(InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"adm_conf_man_{order_id}"))
     builder.add(InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm_decl_man_{order_id}"))
 
-    file_bytes = await file.read()
-    receipt_file = BufferedInputFile(file_bytes, filename=file.filename or "receipt.jpg")
+    safe_name = file.filename or "receipt.jpg"
+    # Очищаем имя от управляющих символов, чтобы не ломать подпись Telegram и не подставить гадости.
+    import re as _re
+    safe_name = _re.sub(r"[^A-Za-z0-9._-]+", "_", safe_name).strip("._") or "receipt.jpg"
+    receipt_file = BufferedInputFile(file_bytes, filename=safe_name)
 
     try:
         if (file.content_type or "").startswith("image/"):
@@ -1199,12 +1330,24 @@ async def platega_webhook(request: Request):
 async def get_captcha():
     now = datetime.utcnow()
     expired = [k for k, v in CAPTCHA_STORE.items() if v["expires"] < now]
-    for k in expired: CAPTCHA_STORE.pop(k, None)
+    for k in expired:
+        CAPTCHA_STORE.pop(k, None)
 
-    num1, num2 = random.randint(1, 10), random.randint(1, 10)
+    # Простая арифметика с диапазоном 1-20 — уже не 19 возможных ответов,
+    # а 39, и с лимитом 3 попыток на ID брутфорс перестаёт быть тривиальным.
+    ops = [
+        lambda a, b: (a + b, f"{a} + {b}"),
+        lambda a, b: (a - b, f"{a} − {b}") if a >= b else (b - a, f"{b} − {a}"),
+    ]
+    a, b = random.randint(5, 20), random.randint(1, 15)
+    answer, question = random.choice(ops)(a, b)
     session_id = str(uuid.uuid4())
-    CAPTCHA_STORE[session_id] = {"answer": num1 + num2, "expires": now + timedelta(minutes=5)}
-    return {"captcha_id": session_id, "question": f"Сколько будет {num1} + {num2}?"}
+    CAPTCHA_STORE[session_id] = {
+        "answer": answer,
+        "expires": now + timedelta(minutes=5),
+        "fails": 0,
+    }
+    return {"captcha_id": session_id, "question": f"Сколько будет {question}?"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
