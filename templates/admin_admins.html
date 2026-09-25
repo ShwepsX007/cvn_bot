@@ -1,0 +1,49 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-3">➕ Назначить администратора</h5>
+    <form method="post" action="/admin/web/admins/add" class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label small text-muted">Telegram ID пользователя</label>
+            <input type="number" name="tg_id" class="form-control" placeholder="напр. 123456789" required>
+        </div>
+        <div class="col-md-3">
+            <button type="submit" class="btn btn-success w-100 rounded-pill">Назначить</button>
+        </div>
+    </form>
+    <small class="text-muted d-block mt-2">
+        ID можно узнать у пользователя (он виден в шапке его кабинета на сайте) или через @userinfobot.
+        Назначенный админ получит доступ к этой панели после входа на сайт.
+    </small>
+</div>
+
+<div class="card card-custom p-4">
+    <h5 class="fw-bold mb-3">🛡 Администраторы</h5>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th>Telegram ID</th><th>Имя / username</th><th>Роль</th><th>Добавлен</th><th style="width:140px"></th></tr></thead>
+            <tbody>
+            {% for a in admins %}
+                <tr>
+                    <td><code>{{ a.tg_id }}</code></td>
+                    <td>{{ a.name or '—' }}{% if a.username %}<br><small class="text-muted">@{{ a.username }}</small>{% endif %}</td>
+                    <td>{% if a.is_root %}<span class="badge bg-primary rounded-pill">Главный (config.py)</span>{% else %}<span class="badge bg-secondary rounded-pill">Админ</span>{% endif %}</td>
+                    <td><small class="text-muted">{{ a.added_at }}</small></td>
+                    <td class="text-end">
+                        {% if not a.is_root %}
+                        <form method="post" action="/admin/web/admins/remove" class="d-inline"
+                              onsubmit="return confirm('Снять права администратора с {{ a.tg_id }}?')">
+                            <input type="hidden" name="tg_id" value="{{ a.tg_id }}">
+                            <button class="btn btn-outline-danger btn-sm rounded-pill">Снять права</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

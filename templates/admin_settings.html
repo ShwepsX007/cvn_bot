@@ -1,0 +1,82 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4">
+    <h5 class="fw-bold mb-1">⚙️ Настройки</h5>
+    <small class="text-muted d-block mb-3">
+        Отправка писем сейчас: <b>{{ mail_status }}</b>.
+        Секретные поля (пароли, ключи) не отображаются — введите новое значение, чтобы заменить; пустое поле = «не менять».
+    </small>
+
+    {% if mail_status == 'не настроена' %}
+    <div class="alert alert-warning rounded-3 small">
+        ⚠️ Почта выключена. Проверьте в таблице ниже: строка <b>«Тип отправки почты (mail_mode)»</b> должна быть <code>auto</code>
+        (если там <code>off</code> — впишите <code>auto</code> и сохраните), и должен быть задан либо Resend-ключ, либо SMTP.
+    </div>
+    {% endif %}
+
+    <div class="card card-custom p-3 mb-3 border border-info d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <b>🔄 Автообновление AWG-нод</b> — ежедневно в 05:05 контейнеры
+            <code>amneziavpn/amneziawg-go</code> обновляются до свежей сборки.
+            <small class="text-muted d-block">Конфиги клиентов не меняются (ключи в volume), даунтайм ~10 сек; о результате бот отчитается вам в личку, а на странице «Серверы» останется отчёт.</small>
+        </div>
+        <form method="post" action="/admin/web/settings" class="d-flex align-items-center gap-2">
+            <input type="hidden" name="key" value="container_autoupdate">
+            <input type="hidden" name="value" id="autoup_value" value="{{ 'off' if container_autoupdate else 'on' }}">
+            <button class="btn btn-{{ 'danger' if container_autoupdate else 'success' }} btn-sm rounded-pill px-3">
+                {{ '⚫ Выключить' if container_autoupdate else '⚡ Включить' }}
+            </button>
+        </form>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th style="width:280px">Параметр</th><th>Значение</th><th style="width:110px"></th></tr></thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td>
+                        <b>{{ row.label }}</b><br>
+                        <small class="text-muted"><code>{{ row.key }}</code></small>
+                        {% if row.masked %}<br><small class="text-muted">сейчас: {{ row.masked }}</small>{% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="/admin/web/settings" class="d-flex gap-2">
+                            <input type="hidden" name="key" value="{{ row.key }}">
+                            {% if row.is_long %}
+                                <textarea name="value" class="form-control form-control-sm" rows="2">{{ row.value }}</textarea>
+                            {% else %}
+                                <input type="text" name="value" class="form-control form-control-sm"
+                                       value="{{ row.value }}" placeholder="{{ 'введите новое значение…' if row.is_secret }}">
+                            {% endif %}
+                    </td>
+                    <td class="text-end">
+                            <button class="btn btn-primary btn-sm rounded-pill">💾</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card card-custom p-4 mt-4">
+    <h5 class="fw-bold mb-3">📬 Проверка доставки почты</h5>
+    <form method="post" action="/admin/web/mailtest" class="row g-2 align-items-end">
+        <div class="col-md-5">
+            <label class="form-label small text-muted">Куда отправить тестовое письмо</label>
+            <input type="email" name="to" class="form-control" placeholder="vashmail@gmail.com" required>
+        </div>
+        <div class="col-md-3">
+            <button type="submit" class="btn btn-outline-primary w-100 rounded-pill">Отправить тест</button>
+        </div>
+    </form>
+    <small class="text-muted d-block mt-2">
+        Если сервис «принял» письмо, а его нет во входящих — смотрите папку <b>СПАМ</b> и лог отправок
+        в Resend (Emails → Logs): там видно, было ли письмо доставлено или отклонено (bounce).
+    </small>
+</div>
+
+{% endblock %}

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,6 +17,7 @@
         .price-btn { min-width: 150px; }
         .badge-trial { background: #ffc107; color: #333; }
     </style>
+    <link rel="stylesheet" href="/static/dark-theme.css">
 </head>
 <body>
 
@@ -26,7 +27,14 @@
             <h4 class="fw-bold mb-0">🔐 Личный кабинет</h4>
             <small>{{ display_name }} · ID {{ tg_id }}</small>
         </div>
-        <a href="/logout" class="btn btn-light btn-sm rounded-pill px-3">Выйти</a>
+        <div class="d-flex gap-2">
+            <a href="/" class="btn btn-outline-light btn-sm rounded-pill px-3">🏠 Главная</a>
+            <a href="/free" class="btn btn-success btn-sm rounded-pill px-3">🎁 Бесплатный VPN</a>
+            {% if is_admin %}
+            <a href="/admin/web" class="btn btn-warning btn-sm rounded-pill px-3">🛠 Админка</a>
+            {% endif %}
+            <a href="/logout" class="btn btn-light btn-sm rounded-pill px-3">Выйти</a>
+        </div>
     </div>
 </div>
 
@@ -74,11 +82,22 @@
                         <small class="text-muted">Активно до: {{ sub.expire }}</small>
                     </div>
                     {% if sub.has_config %}
-                        <a href="/download/{{ sub.server_id }}" class="btn btn-outline-success btn-sm rounded-pill">⬇️ Скачать конфиг</a>
+                        <div class="d-flex gap-2 flex-wrap justify-content-end">
+                            <a href="/download/{{ sub.server_id }}" class="btn btn-outline-success btn-sm rounded-pill">⬇️ .conf</a>
+                            <button class="btn btn-outline-info btn-sm rounded-pill" onclick="toggleQr({{ sub.server_id }})">📱 QR-код</button>
+                            <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleConfigText({{ sub.server_id }})">👁 Конфиг текстом</button>
+                        </div>
                     {% else %}
                         <button class="btn btn-outline-warning btn-sm rounded-pill" onclick="reissueConfig({{ sub.server_id }})">🔄 Обновить конфиг</button>
                     {% endif %}
                 </div>
+                {% if sub.has_config %}
+                <div id="qr-block-{{ sub.server_id }}" class="mt-3" style="display:none">
+                    <img src="/qr/{{ sub.server_id }}" class="qr-img" alt="QR-код конфига" style="max-width:230px">
+                    <div class="small text-muted mt-1">Откройте AmneziaWG на телефоне → «Добавить туннель» → «Сканировать QR-код» и наведите камеру на этот код.</div>
+                </div>
+                <pre id="cfg-text-{{ sub.server_id }}" class="cfg-pre small mt-3 p-2" style="display:none; white-space:pre-wrap"></pre>
+                {% endif %}
                 {% if not sub.has_config %}
                 <div class="small text-muted mt-2">
                     Этот доступ оформлен до обновления сайта, поэтому файл пока не сохранен здесь для скачивания.
@@ -90,6 +109,23 @@
             {% endfor %}
         {% else %}
             <p class="text-muted mb-0">У вас пока нет активных подписок. Оформите ниже 👇</p>
+        {% endif %}
+    </div>
+
+    <!-- ===================== ПОЧТА АККАУНТА ===================== -->
+    <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold mb-2">📧 Почта</h5>
+        {% if bound_email %}
+            <p class="mb-1">Привязана: <b>{{ bound_email }}</b></p>
+            <small class="text-muted d-block mb-2">По ней можно входить в кабинет на странице «Почта».
+            {% if not email_has_password %}Пароль еще не задан — создайте его через «Забыли пароль» на странице входа.{% endif %}</small>
+        {% else %}
+            <small class="text-muted d-block mb-2">Привяжите почту — сможете входить в кабинет по логину/паролю и восстанавливать доступ, даже если Telegram недоступен.</small>
+            <div class="d-flex gap-2 flex-wrap align-items-center">
+                <input type="email" id="linkEmailInput" class="form-control" style="max-width:280px" placeholder="Ваша почта">
+                <button class="btn btn-outline-primary rounded-pill" onclick="linkEmail()">Привязать</button>
+            </div>
+            <div id="linkEmailResult" class="small mt-2"></div>
         {% endif %}
     </div>
 
@@ -181,7 +217,11 @@
       <div class="modal-body" id="buyModalBody">
         <p>Сумма к оплате: <b id="buyAmount">-</b> руб.</p>
         <div class="d-grid gap-2">
+            {% if auto_pay_enabled %}
             <button class="btn btn-primary rounded-pill" onclick="chooseMethod('auto')">⚡️ Оплатить картой (авто)</button>
+            {% else %}
+            <p class="small text-muted text-center mb-0">⚡️ Автооплата картой временно недоступна</p>
+            {% endif %}
             <button class="btn btn-outline-secondary rounded-pill" onclick="chooseMethod('manual')">📥 Ручная оплата (по чеку)</button>
         </div>
         <div id="methodResult" class="mt-3"></div>
@@ -207,6 +247,33 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str == null ? '' : String(str);
     return div.innerHTML;
+}
+
+// --- QR-код и текст конфига по кнопкам подписки ---
+function toggleQr(serverId) {
+    const el = document.getElementById(`qr-block-${serverId}`);
+    el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+}
+
+const cfgTextCache = {};
+async function toggleConfigText(serverId) {
+    const el = document.getElementById(`cfg-text-${serverId}`);
+    if (el.style.display === 'block') { el.style.display = 'none'; return; }
+    if (!cfgTextCache[serverId]) {
+        el.textContent = '⏳ Загрузка...';
+        el.style.display = 'block';
+        try {
+            const res = await fetch(`/web/config/${serverId}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || 'Ошибка');
+            cfgTextCache[serverId] = data.config;
+        } catch (e) {
+            el.textContent = '❌ ' + e.message;
+            return;
+        }
+    }
+    el.textContent = cfgTextCache[serverId];
+    el.style.display = 'block';
 }
 
 async function reissueConfig(serverId) {
@@ -357,6 +424,26 @@ async function pollManual(orderId) {
             document.getElementById('methodResult').innerHTML += '<div class="alert alert-danger small mt-2">Платеж отклонен администратором.</div>';
         }
     } catch (e) { /* тихо игнорируем сетевые сбои опроса */ }
+}
+
+async function linkEmail() {
+    const input = document.getElementById('linkEmailInput');
+    const resDiv = document.getElementById('linkEmailResult');
+    const email = (input.value || '').trim();
+    if (!email) { resDiv.innerHTML = '<span class="text-danger">Введите почту.</span>'; return; }
+    resDiv.innerHTML = '⏳ Отправляем письмо со ссылкой...';
+    try {
+        const res = await fetch('/web/link_email', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email: email})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        resDiv.innerHTML = '<span class="text-success">✅ Письмо отправлено! Перейдите по ссылке из него — почта привяжется к этому аккаунту.</span>';
+        input.value = '';
+    } catch (e) {
+        resDiv.innerHTML = `<span class="text-danger">❌ ${escapeHtml(e.message)}</span>`;
+    }
 }
 
 async function sendSupport() {

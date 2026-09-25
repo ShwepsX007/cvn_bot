@@ -1,0 +1,79 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-1">📥 Заявки на реквизиты (ручная оплата)</h5>
+    <small class="text-muted d-block mb-3">Одобрите — пользователь увидит реквизиты в кабинете (и получит уведомление в боте).</small>
+    {% if details %}
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th>#</th><th>Пользователь</th><th>Сервер</th><th>Тариф</th><th>Создано</th><th></th></tr></thead>
+            <tbody>
+            {% for r in details %}
+                <tr>
+                    <td>{{ r.id }}</td>
+                    <td><code>{{ r.tg_id }}</code></td>
+                    <td>{{ r.server }}</td>
+                    <td>{{ r.period }}</td>
+                    <td><small class="text-muted">{{ r.created }}</small></td>
+                    <td class="text-end">
+                        <form method="post" action="/admin/web/requests/details" class="d-inline">
+                            <input type="hidden" name="request_id" value="{{ r.id }}">
+                            <input type="hidden" name="action" value="approve">
+                            <button class="btn btn-success btn-sm rounded-pill">✅ Одобрить</button>
+                        </form>
+                        <form method="post" action="/admin/web/requests/details" class="d-inline">
+                            <input type="hidden" name="request_id" value="{{ r.id }}">
+                            <input type="hidden" name="action" value="reject">
+                            <button class="btn btn-outline-danger btn-sm rounded-pill">❌</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">Новых заявок нет.</p>
+    {% endif %}
+</div>
+
+<div class="card card-custom p-4">
+    <h5 class="fw-bold mb-1">🧾 Чеки на проверку (ручная оплата)</h5>
+    <small class="text-muted d-block mb-3">Подтвердите — пользователю автоматически выдается конфиг.</small>
+    {% if manuals %}
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th>#</th><th>Пользователь</th><th>Сервер</th><th>Тариф</th><th>Сумма</th><th>Создано</th><th></th></tr></thead>
+            <tbody>
+            {% for o in manuals %}
+                <tr>
+                    <td>{{ o.id }}</td>
+                    <td><code>{{ o.tg_id }}</code></td>
+                    <td>{{ o.server }}</td>
+                    <td>{{ o.period }}</td>
+                    <td><b>{{ o.amount }} ₽</b></td>
+                    <td><small class="text-muted">{{ o.created }}</small></td>
+                    <td class="text-end">
+                        <form method="post" action="/admin/web/requests/manual" class="d-inline">
+                            <input type="hidden" name="order_id" value="{{ o.id }}">
+                            <input type="hidden" name="action" value="confirm">
+                            <button class="btn btn-success btn-sm rounded-pill">✅ Подтвердить и выдать</button>
+                        </form>
+                        <form method="post" action="/admin/web/requests/manual" class="d-inline">
+                            <input type="hidden" name="order_id" value="{{ o.id }}">
+                            <input type="hidden" name="action" value="decline">
+                            <button class="btn btn-outline-danger btn-sm rounded-pill">❌</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">Чеков на проверку нет.</p>
+    {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Почта — AmneziaWG VPN</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #0d6efd, #0dcaf0);
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            align-items: center;
+        }
+        .login-card {
+            border: none;
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+        }
+    </style>
+    <link rel="stylesheet" href="/static/dark-theme.css">
+</head>
+<body>
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="card login-card p-4 p-md-5 bg-white text-center">
+
+                <h3 class="fw-bold mb-4">🔐 AmneziaWG VPN</h3>
+
+                {# ====== ВОССТАНОВЛЕНИЕ ПАРОЛЯ: форма запроса ====== #}
+                {% if mode == 'forgot' and status == 'form' %}
+                <h5 class="mb-3">Восстановление пароля</h5>
+                <p class="text-muted small">Введите почту, с которой регистрировались. Пришлем ссылку для сброса пароля.</p>
+                <form method="post" action="/auth/email/forgot">
+                    <div class="mb-3">
+                        <input type="email" name="email" class="form-control" placeholder="Ваша почта" required autocomplete="email">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 rounded-pill">Отправить ссылку</button>
+                </form>
+                {% endif %}
+
+                {# ====== УНИВЕРСАЛЬНЫЕ СТАТУСЫ ====== #}
+                {% if status == 'sent' %}
+                <div class="display-4 mb-3">📬</div>
+                <p class="mb-3">{{ message }}</p>
+                {% endif %}
+
+                {% if status == 'ok' %}
+                <div class="display-4 mb-3">✅</div>
+                <h5 class="mb-2">{{ message }}</h5>
+                {% if email %}<p class="text-muted small">{{ email }}</p>{% endif %}
+
+                {% if reset_token %}
+                <hr>
+                <p class="text-muted small">Осталось задать пароль, чтобы входить на сайт по почте без Telegram:</p>
+                <form method="post" action="/auth/email/reset" class="text-start">
+                    <input type="hidden" name="token" value="{{ reset_token }}">
+                    <div class="mb-2">
+                        <input type="password" name="password" class="form-control" placeholder="Новый пароль (минимум 8 символов)" required minlength="8" autocomplete="new-password">
+                    </div>
+                    <div class="mb-3">
+                        <input type="password" name="confirm" class="form-control" placeholder="Пароль еще раз" required minlength="8" autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-success w-100 rounded-pill">Сохранить пароль</button>
+                </form>
+                {% else %}
+                {% if bot_username %}
+                <p class="text-muted small mt-3">Откройте бота, чтобы получать конфиги и уведомления в Telegram:</p>
+                <a href="https://t.me/{{ bot_username }}" class="btn btn-outline-primary w-100 rounded-pill mb-2">💬 Открыть бота</a>
+                {% endif %}
+                <a href="/dashboard" class="btn btn-primary w-100 rounded-pill">Перейти в личный кабинет</a>
+                {% endif %}
+                {% endif %}
+
+                {% if status == 'invalid' %}
+                <div class="display-4 mb-3">⛔</div>
+                <div class="alert alert-danger rounded-3 small">{{ message }}</div>
+                <a href="/login?tab=email" class="btn btn-outline-primary rounded-pill">На страницу входа</a>
+                {% endif %}
+
+                {# ====== СБРОС ПАРОЛЯ: форма нового пароля ====== #}
+                {% if mode == 'reset' and status == 'form' %}
+                <h5 class="mb-1">Новый пароль</h5>
+                {% if email %}<p class="text-muted small mb-3">для {{ email }}</p>{% endif %}
+                {% if message %}<div class="alert alert-warning rounded-3 small">{{ message }}</div>{% endif %}
+                <form method="post" action="/auth/email/reset">
+                    <input type="hidden" name="token" value="{{ token }}">
+                    <div class="mb-2">
+                        <input type="password" name="password" class="form-control" placeholder="Новый пароль (минимум 8 символов)" required minlength="8" autocomplete="new-password">
+                    </div>
+                    <div class="mb-3">
+                        <input type="password" name="confirm" class="form-control" placeholder="Пароль еще раз" required minlength="8" autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-success w-100 rounded-pill">Сохранить пароль</button>
+                </form>
+                {% endif %}
+
+                <hr class="my-4">
+                {% if status != 'invalid' %}
+                <a href="/login" class="btn btn-link btn-sm">← На страницу входа</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

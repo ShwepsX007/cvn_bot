@@ -1,0 +1,146 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="row">
+<div class="col-lg-7">
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-1">🧙‍♂️ Мастер подключения сервера</h5>
+    <small class="text-muted d-block mb-3">
+        Рекомендуемый сценарий: <b>сначала 1–4 шага инструкции справа</b> (подготовка сервера +
+        установка Amnezia официальным приложением), потом эта форма. Мастер сам докинет SSH-ключ бота,
+        проверит контейнер, зальёт скрипты выдачи конфигов и занесёт сервер в базу.
+        Если Amnezia на ноде ещё нет — мастер попробует поставить её сам, но проверенный путь — приложение.
+        Пароль нигде не сохраняется.
+    </small>
+    <form method="post" action="/admin/web/servers/wizard" id="wizardForm">
+        <div class="row g-2">
+            <div class="col-md-7">
+                <label class="form-label small text-muted">IP-адрес нового сервера</label>
+                <input type="text" name="ip" class="form-control" placeholder="203.0.113.10" required>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small text-muted">SSH-порт</label>
+                <input type="number" name="ssh_port" class="form-control" value="2222" required>
+                <small class="text-muted">обычно <b>2222</b> — см. шаг 3 инструкции справа</small>
+            </div>
+            <div class="col-12">
+                <label class="form-label small text-muted">Пароль root нового сервера</label>
+                <input type="password" name="ssh_password" class="form-control" placeholder="из панели хостера / письма" required autocomplete="off">
+                <small class="text-muted">Используется один раз — для передачи SSH-ключа. Дальше бот ходит по ключу.</small>
+            </div>
+            <div class="col-md-7">
+                <label class="form-label small text-muted">Название (локация), как в продаже</label>
+                <input type="text" name="name" class="form-control" placeholder="🇳🇱 Нидерланды">
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small text-muted">Лимит мест</label>
+                <input type="number" name="limit" class="form-control" value="20" required>
+            </div>
+        </div>
+        
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_free" id="wiz_is_free">
+                            <label class="form-check-label" for="wiz_is_free">🎁 <b>Бесплатная нода</b> - выдается только на сайте (/free), в Telegram-боте не показывается</label>
+                        </div>
+                    </div>
+<button type="submit" class="btn btn-warning rounded-pill px-4 mt-3" id="wizardBtn">🚀 Установить сервер</button>
+    </form>
+    <div id="wizardWait" class="alert alert-info rounded-3 small mt-3 mb-0" style="display:none">
+        ⏳ <b>Идёт установка — 1–5 минут.</b> Не закрывайте страницу: скачивается docker-образ.
+        По окончании здесь появится подробный лог по шагам.
+    </div>
+</div>
+
+</div>
+<div class="col-lg-5">
+
+<div class="card card-custom p-4 mb-4">
+    <h6 class="fw-bold mb-1">📋 Подготовка нового сервера — простыми словами</h6>
+    <small class="text-muted d-block mb-3">
+        Почему всё именно так: сервер бота (где крутится бот) не может стучаться в стандартную «дверь» SSH №22 —
+        его собственный провайдер закрыл выход. Поэтому мы договариваемся стучаться в дверь №<b>2222</b>,
+        и на каждом новом сервере её рядом с привычной №22 открываем одной командой (шаг 3).
+    </small>
+
+    <div class="alert alert-light border rounded-3 small mb-3">
+        <b>🧒 Словарик:</b><br>
+        <b>Порт</b> — номер «двери» на сервере (от 1 до 65535). SSH стоит за дверью 22 (мы добавим 2222), а трафик ваших клиентов пойдёт за дверью с номером вида 40158.<br>
+        <b>TCP</b> — «по бумажкам» (подходит для команд и входа — SSH). <b>UDP</b> — «на голос» (подходит для VPN-данных, так трафик клиентов бежит быстрее).<br>
+        <b>Firewall</b> — охранник на входе у хостера: если двери нет в его списке разрешённых — никто не пройдёт.<br>
+        <b>0.0.0.0/0</b> — «все адреса интернета». Пишется в поле «источник»: впускать с любого IP.
+    </div>
+
+    <ol class="small mb-0">
+        <li><b>Купите VPS.</b> В панели хостера: тариф <b>Ubuntu 22.04 или 24.04</b>, виртуализация <b>KVM</b> — и получите по почте/в панели <b>IP</b> (например <code>45.12.34.56</code>) и <b>root-пароль</b>. Сохраните — они нужны в шагах 3–5.</li>
+
+        <li class="mt-2"><b>Проверьте дверь 2222 у «охранника» хостера.</b> В панели хостера найдите раздел <b>«Firewall» / «Файрвол» / «Сеть»</b> (у некоторых хостеров его нет — тогда здесь ничего делать не надо, всё и так открыто). Добавьте <b>правило</b> и заполните его примерно так:<br>
+            <code>протокол = TCP</code> · <code>порт = 2222</code> · <code>источник = 0.0.0.0/0</code><br>
+            Читается так: «пускать всех, кто стучится в дверь 2222 обычными письмами (TCP)». Сюда же в шаге 6 добавим дверь для трафика VPN.</li>
+
+        <li class="mt-2"><b>Откройте на самом сервере дверь 2222</b> (команды вводятся в <b>VNC/веб-консоль</b> хостера — чёрный экран терминала вашего сервера).<br>
+            Сначала узнайте, какой у вас вариант:
+            <code>systemctl status ssh.socket --no-pager</code>
+            <ul class="mb-0 mt-1">
+                <li><b>Увидели слово «active» → Ubuntu 24.04, вот эти команды целиком:</b>
+<pre class="p-2 rounded mb-1 mt-1" style="background:#161b22;color:#e6edf3">mkdir -p /etc/systemd/system/ssh.socket.d
+cat &gt; /etc/systemd/system/ssh.socket.d/listen.conf &lt;&lt;'EOF'
+[Socket]
+ListenStream=
+ListenStream=0.0.0.0:22
+ListenStream=0.0.0.0:2222
+EOF
+systemctl daemon-reload
+systemctl restart ssh.socket</pre>
+                  <small class="text-muted">⚠️ «0.0.0.0:» в командах — не опечатка: так мы явно просим слушать для IPv4. Без него иногда слушает только на IPv6 ([::] в выводе) — и бот достучаться не может.</small>
+                </li>
+                <li class="mt-1"><b>Написало «not found / no such» → Ubuntu 22.04, одна команда:</b><br>
+                  <code>echo -e "Port 22\nPort 2222" &gt;&gt; /etc/ssh/sshd_config &amp;&amp; systemctl restart ssh</code>
+                </li>
+            </ul>
+            <b>Проверка обязательно:</b> <code>ss -tlnp | grep sshd</code> — в ответе <b>две строки</b>: порт 22 и порт 2222. И с вашего компьютера: <code>ssh root@ВАШ-IP -p 2222</code> — пускает.
+        </li>
+
+        <li class="mt-2"><b>Поставьте Amnezia через официальное приложение</b> (на своём компьютере — с него дверь 22 доступна, всё честно):
+            в приложении <b>«+» → «У меня есть данные доступа»</b> (или «Добавить сервер») → впишите IP, порт <b>22</b>, логин <b>root</b>, пароль → выберите <b>AmneziaWG</b> → «Установить». Ждите 2–5 минут.
+            Как закончит — создайте в приложении тестового клиента, скачайте конфиг и включите: побежал ли через VPN интернет — значит, контейнер <code>amnezia-awg2</code> жив и всё готово.
+        </li>
+
+        <li class="mt-2"><b>Теперь мастер (форма слева).</b> Впишите: IP, SSH-порт <b>2222</b>, root-пароль → кнопка <b>«🚀 Установить сервер»</b>. Он сам зайдёт, проверит контейнер (при необходимости — подремонтирует), скинет скрипты выдачи конфигов и впишет сервер в «продажу».</li>
+
+        <li class="mt-2"><b>Откройте у охранника дверь для трафика клиентов.</b> В конце журнала мастер напишет «внешний UDP-порт: <b>40158</b>» — это дверь, по которой пойдут ваши клиенты. Вернитесь в <b>тот же раздел Firewall</b> (как в шаге 2) и добавьте правило:<br>
+            <code>протокол = UDP</code> · <code>порт = тот, что назвал мастер</code> (у вас свой номер, не обязательно 40158) · <code>источник = 0.0.0.0/0</code><br>
+            ⚠️ UDP, не TCP — частая путаница. Забыли шаг — клиенты подключатся к VPN, но интернет не будет грузиться.
+        </li>
+
+        <li class="mt-2"><b>Проверка через бота:</b> «Клиенты» → тестовый доступ на новый сервер → конфиг импортируйте в AmneziaWG на телефоне → включите. Сайты открываются — сервер в боевом составе.</li>
+    </ol>
+</div>
+
+<div class="card card-custom p-4">
+    <h6 class="fw-bold mb-2">🚑 Если не сработало — распознавание по ошибке</h6>
+    <table class="table table-sm small mb-0">
+        <tbody>
+        <tr><td><b>timed out</b> на шаге подключения</td><td>Пакеты не доходят: в форме указан не <b>2222</b>, либо в панели хостера TCP 2222 не открыт/открыт не для всех. Также бывает, если мастер пытаются кормить портом 22 — с сервера бота 22 недоступен и не будет.</td></tr>
+        <tr><td><b>unable to connect</b> к порту 2222</td><td>Дошло, но SSH на 2222 не слушает → шаг 3 не сделан (или сервер переустановили — тогда шаг 3 повторить заново, всё слетает).</td></tr>
+        <tr><td><b>REMOTE HOST IDENTIFICATION HAS CHANGED</b></td><td>Норма после <b>переустановки</b> сервера: host-ключи сменились. С компьютера: <code>ssh-keygen -R &lt;IP&gt;</code> (и при необходимости <code>ssh-keygen -R "[&lt;IP&gt;]:2222"</code>), потом повторный <code>ssh</code> → напечатать <code>yes</code>.</td></tr>
+        <tr><td><b>is restarting</b>/логи пустые у <code>amnezia-awg2</code></td><td>Битый «заводской» контейнер из образа хостера. Решение: удалить контейнер и установить Amnezia через приложение (шаг 4) — или просто запустите мастер еще раз: он попробует авто-ремонт.</td></tr>
+        <tr><td>Мастер завершился✅, но VPN не пропускает трафик</td><td>Не открыт внешний UDP-порт в firewall-панели хостера (шаг 6) — самая частая пропущенная деталь.</td></tr>
+        <tr><td>Amnezia не встаёт и приложением тоже</td><td>Проверьте <code>ls /dev/net/tun</code> и <code>systemd-detect-virt</code>: файла нет или не <code>kvm</code> — тариф/хостер не годится, включите «TUN/TAP» у хостера либо берите другой VPS.</td></tr>
+        </tbody>
+    </table>
+</div>
+
+</div>
+</div>
+
+<script>
+document.getElementById('wizardForm').addEventListener('submit', function() {
+    document.getElementById('wizardBtn').disabled = true;
+    document.getElementById('wizardBtn').textContent = '⏳ Устанавливаю...';
+    document.getElementById('wizardWait').style.display = 'block';
+});
+</script>
+
+{% endblock %}

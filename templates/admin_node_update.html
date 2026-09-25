@@ -1,0 +1,42 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<h5 class="fw-bold mb-3">🔄 Обновление контейнера AmneziaWG — {{ name }} ({{ ip }})</h5>
+
+<div class="card card-custom p-4 mb-4">
+    {% if ok and changed %}
+    <div class="alert alert-success rounded-3">
+        ✔ <b>Готово!</b> Контейнер обновлён до свежей сборки
+        (<code>amneziavpn/amneziawg-go:latest</code>).
+        Выданные клиентам конфиги действуют как раньше — перекачивать ничего не нужно.
+        {% if udp_port %}<br>Внешний UDP-порт сохранён прежним: <b>{{ udp_port }}</b>.{% endif %}
+    </div>
+    <div class="d-flex flex-wrap gap-3">
+        <a href="/admin/web/servers" class="btn btn-success rounded-pill px-4 fw-bold">К списку нод ✔</a>
+    </div>
+    {% elif ok %}
+    <div class="alert alert-info rounded-3">
+        ⚪ Нода уже на последней сборке — контейнер не трогали, пользователи ничего не заметили.
+    </div>
+    <div class="d-flex flex-wrap gap-3">
+        <a href="/admin/web/servers" class="btn btn-primary rounded-pill px-4">← К списку серверов</a>
+    </div>
+    {% else %}
+    <div class="alert alert-danger rounded-3">
+        ❌ <b>Обновление не удалось.</b> Обычно причина: нет SSH-ключа бота на ноде
+        (прогоните её через «🚀 Мастер установки» — он докинет ключ без переустановки) или нода недоступна.
+        <div class="small mt-2">{{ error }}</div>
+    </div>
+    <div class="d-flex flex-wrap gap-3">
+        <a href="/admin/web/servers/wizard" class="btn btn-warning rounded-pill px-4 fw-bold">🚀 Открыть мастер</a>
+        <a href="/admin/web/servers" class="btn btn-outline-primary rounded-pill px-4">← К списку серверов</a>
+    </div>
+    {% endif %}
+</div>
+
+<div class="card card-custom p-4">
+    <h6 class="fw-bold mb-2">📋 Журнал операции</h6>
+    <pre class="small rounded-3 p-3 mb-0" style="background:#161b22;color:#e6edf3;white-space:pre-wrap;word-break:break-word;">{{ log or '(пусто)' }}</pre>
+</div>
+
+{% endblock %}
