@@ -51,7 +51,14 @@ SETTING_LABELS = {
     "mail_smtp_tls": "SMTP TLS (starttls/ssl/none)",
     "mail_from": "Отправитель писем (From)",
     "mail_resend_key": "Resend API-ключ",
+    "container_autoupdate": "Автообновление AWG-контейнера (on/off)",
+    "node_update_report": "Отчет автообновления (служебное)",
 }
+
+# Эти ключи не показываем в таблице настроек: container_autoupdate рисуется отдельным
+# чекбоксом, остальные - служебные (меняются кодом, а не руками).
+HIDDEN_SETTING_KEYS = {"container_autoupdate", "node_update_report",
+                       "stats_baseline_count", "stats_baseline_sum"}
 
 PERIOD_LABELS = {"trial": "Пробный", "1d": "1 день", "7d": "7 дней", "30d": "30 дней"}
 
@@ -210,7 +217,11 @@ async def admin_servers(request: Request):
             "price_1d": p1, "price_7d": p7, "price_30d": p30,
             "subs_total": subs_total, "subs_active": subs_active,
         })
-    return templates.TemplateResponse(request=request, name="admin_servers.html", context=_ctx(request, "servers", servers=servers))
+    autoupdate = (db.get_setting("container_autoupdate") or "").strip().lower() == "on"
+    report = (db.get_setting("node_update_report") or "").strip()
+    return templates.TemplateResponse(request=request, name="admin_servers.html", context=_ctx(
+        request, "servers", servers=servers, autoupdate=autoupdate, update_report=report
+    ))
 
 
 @router.post("/servers/add")
@@ -271,6 +282,41 @@ async def admin_server_delete(request: Request, server_id: int = Form(...), mode
         return _back("/admin/web/servers", msg=note)
     except Exception as e:
         return _back("/admin/web/servers", error=f"Ошибка удаления: {e}")
+
+
+@router.post("/servers/awg-update")
+async def admin_node_update(request: Request, server_id: int = Form(...)):
+    """🔄 Ручное обновление контейнера AmneziaWG на существующей ноде до :latest.
+    Конфиги пиров живут в volume и не слетают - клиентам перекачивать ничего не нужно.
+    Отдельный путь /servers/awg-update, чтобы не пересекаться с /servers/update (сохранение карточки сервера)."""
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+
+    srv = db.get_server_by_id(server_id)
+    if not srv:
+        return _back("/admin/web/servers", error="Сервер не найден в базе.")
+    sid = server_id
+    ip, port, name = srv[0], srv[1], srv[2]  # get_server_by_id: (ip, port, name, max_users, ...)
+
+    log_lines = []
+    try:
+        import server_installer
+        result = await asyncio.to_thread(server_installer.update_container, ip, port, log_lines.append)
+    except Exception as e:
+        result = {"ok": False, "changed": False, "udp_port": None,
+                  "error": f"{type(e).__name__}: {e}"}
+
+    if result.get("ok"):
+        db.update_setting("node_update_report",
+                          f"✅ Ручное обновление {name} ({ip}): " +
+                          ("контейнер обновлен до свежей сборки." if result.get("changed") else "уже последняя версия - не трогал."))
+
+    return templates.TemplateResponse(request=request, name="admin_node_update.html", context=_ctx(
+        request, "servers", ok=result["ok"], changed=result.get("changed", False),
+        sid=sid, name=name, ip=ip, udp_port=result.get("udp_port"),
+        old_image=result.get("old_image"), new_image=result.get("new_image"),
+        log="\n".join(log_lines), error=result.get("error")
+    ))
 
 
 # ==================== МАСТЕР УСТАНОВКИ НОВОГО СЕРВЕРА ====================
@@ -417,6 +463,8 @@ async def admin_settings(request: Request):
         return RedirectResponse(url="/login")
     rows = []
     for key, value in db.get_all_settings():
+        if key in HIDDEN_SETTING_KEYS:
+            continue
         is_secret = key in SECRET_KEYS
         rows.append({
             "key": key,
@@ -427,7 +475,8 @@ async def admin_settings(request: Request):
             "is_long": len(value or "") > 40 and not is_secret,
         })
     return templates.TemplateResponse(request=request, name="admin_settings.html", context=_ctx(
-        request, "settings", rows=rows, mail_status=mailer.describe()
+        request, "settings", rows=rows, mail_status=mailer.describe(),
+        container_autoupdate=(db.get_setting("container_autoupdate") or "").strip().lower() == "on"
     ))
 
 

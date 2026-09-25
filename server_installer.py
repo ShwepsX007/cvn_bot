@@ -171,6 +171,145 @@ def _install_amnezia_container(ssh, udp_port, log_lines):
     _must(ssh, run_cmd, "запуск контейнера", log_lines, timeout=300)
 
 
+BOT_KEY_CANDIDATES = (
+    "/root/.ssh/id_ed25519",
+    os.path.expanduser("~/.ssh/id_ed25519"),
+    "/root/.ssh/id_rsa",
+    os.path.expanduser("~/.ssh/id_rsa"),
+)
+
+
+def _connect_with_key(ip, port, log_lines):
+    """Подключение к ноде по SSH-ключу бота (так же ходит бот в повседневной работе)."""
+    import paramiko
+    last_err = None
+    for path in BOT_KEY_CANDIDATES:
+        if not os.path.exists(path):
+            continue
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(ip, port=port, username="root", key_filename=path,
+                        timeout=15, banner_timeout=20, auth_timeout=20,
+                        allow_agent=False, look_for_keys=False)
+            _log(log_lines, f"🔌 Подключено по ключу {path}")
+            return ssh
+        except Exception as e:
+            last_err = e
+            _log(log_lines, f"   ⚠️ ключ {path} не подошел: {e}")
+    raise InstallError(
+        f"Не удалось подключиться к root@{ip}:{port} SSH-ключом бота ({last_err}). "
+        "Если нода старая и ключ на нее не ставился - прогоните ее через "
+        "«🚀 Мастер установки» (он докинет ключ) или выполните ssh-copy-id вручную."
+    )
+
+
+def update_container(ip, port, progress=None):
+    """Обновление контейнера AmneziaWG на существующей ноде до :latest.
+
+    Безопасно для пользователей: конфиг сервера и публичные ключи пиров лежат в
+    volume /opt/amnezia/awg (а не внутри образа!), поэтому после пересоздания
+    контейнера ВСЕ ранее выданные клиентские конфиги продолжают работать -
+    главное сохранить тот же внешний UDP-порт (его мы определяем и переиспользуем).
+
+    Возвращает dict: {ok, changed, old_image, new_image, udp_port, steps, error}.
+    ok=True, changed=False означает «уже самая свежая сборка, ничего не трогали».
+    """
+    log_lines = []
+
+    def log(text):
+        _log(log_lines, text)
+        if progress:
+            progress(text)
+
+    res = {"ok": False, "changed": False, "old_image": None, "new_image": None,
+           "udp_port": None, "steps": log_lines, "error": None}
+
+    ssh = None
+    try:
+        log(f"🔌 Подключаюсь к root@{ip}:{port} по SSH-ключу бота...")
+        ssh = _connect_with_key(ip, port, log_lines)
+
+        code, out, err = _run(ssh, f"docker ps -a --format '{{{{.Names}}}}' 2>/dev/null | grep -x {CONTAINER_NAME}")
+        if code != 0:
+            raise InstallError(f"На ноде нет контейнера {CONTAINER_NAME} - нечего обновлять. "
+                               "Прогоните ноду через «🚀 Мастер установки».")
+
+        code, out, _ = _run(ssh, f"docker inspect -f '{{{{.Image}}}}' {CONTAINER_NAME}")
+        old_img = out.strip()
+        res["old_image"] = old_img
+        log(f"📦 Текущий образ контейнера: {old_img[:19]}…")
+
+        log(f"📥 Скачиваю свежий образ {AWG_IMAGE} (1-3 минуты)...")
+        _must(ssh, f"docker pull {AWG_IMAGE}", "docker pull", log_lines, timeout=900)
+        code, out, _ = _run(ssh, f"docker image inspect -f '{{{{.Id}}}}' {AWG_IMAGE}")
+        new_img = out.strip()
+        res["new_image"] = new_img
+
+        if new_img and new_img == old_img:
+            log("✅ Образ уже самый свежий - контейнер НЕ трогаю, пользователи ничего не заметят.")
+            res["ok"] = True
+            res["changed"] = False
+            return res
+
+        log(f"🆕 Обнаружена новая версия ({new_img[:19]}…) - пересоздаю контейнер "
+            "с сохранением конфига и порта...")
+
+        udp_port = _detect_udp_port(ssh, log_lines)
+        if not udp_port:
+            raise InstallError("Не удалось определить внешний UDP-порт контейнера - "
+                               "автообновление ОТМЕНЕНО до удаления (ничего не сломано). "
+                               "Проверьте вручную: docker port amnezia-awg2")
+        res["udp_port"] = udp_port
+        log(f"🔌 Внешний UDP-порт сохраняю прежним: {udp_port} - клиентские конфиги останутся валидными")
+
+        code, out, _ = _run(ssh, f"docker exec {CONTAINER_NAME} awg show | grep -c '^peer:' || true")
+        peers_before = out.strip() if code == 0 else "?"
+        log(f"👥 Пиров (клиентов) в текущем интерфейсе: {peers_before}")
+
+        log("🔄 Пересоздаю контейнер (~10 секунд даунтайм, туннель сам переподключится)...")
+        run_cmd = (
+            f"docker rm -f {CONTAINER_NAME} >/dev/null 2>&1; "
+            f"docker run -d --name {CONTAINER_NAME} --restart always "
+            f"--cap-add NET_ADMIN --device /dev/net/tun "
+            f"-p {udp_port}:{AWG_LISTEN_IN_CONTAINER}/udp "
+            f"-v {AWG_CONF_DIR}:/opt/amnezia/awg "
+            f"{AWG_IMAGE}"
+        )
+        _must(ssh, run_cmd, "пересоздание контейнера", log_lines, timeout=300)
+
+        log("🔍 Проверяю интерфейс AmneziaWG...")
+        code, out, err = _run(ssh, f"sleep 3; docker exec -i {CONTAINER_NAME} awg show 2>&1 | head -5", timeout=60)
+        if "interface" not in out.lower() and "public key" not in out.lower():
+            raise InstallError(f"Контейнер пересоздан, но awg не отвечает:\n{out}\n{err}\n"
+                               "Смотрите на ноде: docker logs amnezia-awg2")
+
+        code, out2, _ = _run(ssh, f"docker exec {CONTAINER_NAME} awg show | grep -c '^peer:' || true")
+        peers_after = out2.strip() if code == 0 else "?"
+        log(f"👥 Пиров после обновления: {peers_after} (было {peers_before})")
+
+        res["ok"] = True
+        res["changed"] = True
+        log("✅ Контейнер обновлен. Ранее выданные конфиги продолжают работать - "
+            "перекачивать ничего не нужно.")
+        return res
+
+    except InstallError as e:
+        res["error"] = str(e)
+        log(f"❌ {e}")
+        return res
+    except Exception as e:
+        res["error"] = f"Непредвиденная ошибка: {type(e).__name__}: {e}"
+        log(f"❌ {res['error']}")
+        return res
+    finally:
+        if ssh:
+            try:
+                ssh.close()
+            except Exception:
+                pass
+
+
 def install_new_server(ip, port, password, server_name, progress=None):
     """Полный цикл установки ноды. progress - функция(кусок лога). Возвращает dict:
     {ok, steps (лог), udp_port, error}."""

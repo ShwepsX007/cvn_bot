@@ -95,6 +95,57 @@ async def check_expired_users():
             else:
                 print(f"❌ Ошибка отключения пользователя {username}: {result}")
 
+# --- АВТООБНОВЛЕНИЕ КОНТЕЙНЕРОВ AMNEZIAWG НА НОДАХ ---
+# Включается в админке: Настройки -> checkbox «Автообновление AWG-контейнера» (container_autoupdate=on).
+# Запускается раз в день в 05:05 (см. web_app.py). Обновление безопасно: ключи пиров и конфиг
+# лежат в volume /opt/amnezia/awg, поэтому выданные клиентам конфиги продолжают работать.
+async def autoupdate_node_containers():
+    from datetime import datetime
+    if (db.get_setting("container_autoupdate") or "").strip().lower() != "on":
+        return
+    try:
+        import server_installer
+    except ImportError:
+        print("⚠️ server_installer недоступен - пропускаю автообновление нод")
+        return
+
+    servers = db.get_active_servers()
+    if not servers:
+        return
+
+    report = [f"🔄 Автообновление AWG-нод от {datetime.now().strftime('%d.%m.%Y %H:%M')}:"]
+    notify = []
+    for srv in servers:
+        sid, ip, port, name = srv[0], srv[1], srv[2], srv[3]  # get_active_servers: (id, ip, port, name, max_users)
+        try:
+            res = await asyncio.to_thread(server_installer.update_container, ip, port)
+        except Exception as e:
+            res = {"ok": False, "changed": False, "error": f"{type(e).__name__}: {e}"}
+
+        if res.get("ok") and res.get("changed"):
+            report.append(f"✅ {name} ({ip}): контейнер обновлен до свежей сборки ({res.get('new_image','')[:19]}…). Конфиги клиентов не изменились и продолжают работать.")
+            notify.append(f"✅ <b>{name}</b>: контейнер AWG обновлен до последней версии.")
+        elif res.get("ok"):
+            report.append(f"⚪ {name} ({ip}): уже последняя сборка - не трогал.")
+        else:
+            err = (res.get("error") or "неизвестная ошибка").split("\n")[0]
+            report.append(f"❌ {name} ({ip}): {err}")
+            notify.append(f"❌ <b>{name}</b>: автообновление не удалось - {err}")
+
+    db.update_setting("node_update_report", "\n".join(report))
+    print("\n".join(report))
+
+    # Сообщаем админам только когда есть что сказать (обновления или ошибки),
+    # а не «все ok, ничего не делал» каждый день.
+    if notify:
+        msg = "🔄 <b>Автообновление нод AmneziaWG:</b>\n\n" + "\n".join(notify)
+        targets = {ADMIN_ID} | {a[0] for a in db.list_admins()}
+        for aid in targets:
+            try:
+                await bot.send_message(aid, msg, parse_mode="HTML")
+            except Exception:
+                pass
+
 # --- ОЧИСТКА МЕРТВЫХ ДУШ (>30 ДНЕЙ) ---
 async def clean_inactive_users():
     inactive = db.get_inactive_users_30d()

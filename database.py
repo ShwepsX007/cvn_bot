@@ -68,7 +68,11 @@ def init_db():
         ('mail_resend_key', ''),
         # Точка отсчета счетчика оплат в веб-админке («Сбросить счетчик»)
         ('stats_baseline_count', '0'),
-        ('stats_baseline_sum', '0')
+        ('stats_baseline_sum', '0'),
+        # Ежедневное автообновление контейнера AmneziaWG на всех активных нодах в 05:05 (on/off)
+        ('container_autoupdate', 'off'),
+        # Текст последнего отчета автообновления (показывается на странице «Серверы»)
+        ('node_update_report', '')
     ]
     cursor.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", default_settings)
     

@@ -25,7 +25,7 @@ import emailauth
 import mailer
 import webauth
 
-from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, clean_inactive_users
+from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, clean_inactive_users, autoupdate_node_containers
 from user_handlers import issue_vpn_access, get_price_for_period, check_and_clean_expired, parse_date, reissue_config_for_active_sub
 from admin_panel import ADMIN_ID
 
@@ -123,6 +123,9 @@ async def startup_event():
     scheduler.add_job(check_expired_web_trials, 'interval', minutes=1)
     
     scheduler.add_job(clean_inactive_users, 'interval', hours=24)
+
+    # Ежедневное автообновление AWG-контейнеров в 05:05 (внутри сама проверяет настройку container_autoupdate)
+    scheduler.add_job(autoupdate_node_containers, 'cron', hour=5, minute=5)
     
     scheduler.start()
     

@@ -8,8 +8,17 @@
             <small class="text-muted">Нужен только IP и root-пароль VPS: ключи, установка AmneziaWG, скрипты и занесение в базу — автоматически.</small>
         </div>
         <a href="/admin/web/servers/wizard" class="btn btn-warning rounded-pill px-4 fw-bold">🚀 Мастер установки</a>
+        {% if autoupdate %}<span class="badge bg-success ms-2">Автообновление нод: ВКЛ (ежедневно 05:05)</span>
+        {% else %}<span class="badge bg-secondary ms-2">Автообновление нод: выкл (включается в Настройках)</span>{% endif %}
     </div>
 </div>
+
+{% if update_report %}
+<div class="card card-custom p-4 mb-4">
+    <h6 class="fw-bold mb-2">🗒 Последний отчёт об обновлении нод</h6>
+    <pre class="small rounded-3 p-3 mb-0" style="background:#161b22;color:#e6edf3;white-space:pre-wrap;word-break:break-word;">{{ update_report }}</pre>
+</div>
+{% endif %}
 
 <div class="card card-custom p-4 mb-4">
     <h5 class="fw-bold mb-3">➕ Добавить сервер вручную (уже установлен)</h5>
@@ -50,6 +59,9 @@
                         title="Убрать из продажи (конфиги продолжат работать)"
                         onclick="return confirm('Выключить сервер #{{ s.id }} — убрать из продажи? Выданные конфиги продолжат работать до истечения.')">⏸ Выкл</button>
                 {% endif %}
+                <button type="submit" formaction="/admin/web/servers/awg-update" class="btn btn-outline-info btn-sm rounded-pill"
+                        title="Обновить контейнер AmneziaWG на ноде до свежей сборки. Конфиги клиентов не слетят и перекачивать их не нужно."
+                        onclick="return confirm('Обновить контейнер AWG на ноде {{ s.ip }} до свежей сборки?\n\nДаунтайм ~10 секунд, все выданные конфиги продолжат работать.')">🔄 Обновить AWG</button>
                 <button type="submit" formaction="/admin/web/servers/delete" name="mode" value="permanent" class="btn btn-outline-danger btn-sm rounded-pill"
                         title="Удалить из базы насовсем"
                         onclick="return confirm('УДАЛИТЬ сервер #{{ s.id }} насовсем из базы?\n\nНа нем подписок: {{ s.subs_total }} (активных: {{ s.subs_active }}).\nСама VPN-нода не трогается, выданные конфиги доживут свой срок.')">🗑 Удалить</button>
