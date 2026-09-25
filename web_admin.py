@@ -278,7 +278,7 @@ async def admin_server_delete(request: Request, server_id: int = Form(...), mode
 async def server_wizard_form(request: Request):
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
-    return templates.TemplateResponse("admin_wizard.html", _ctx(request, "servers"))
+    return templates.TemplateResponse(request=request, name="admin_wizard.html", context=_ctx(request, "servers"))
 
 
 @router.post("/servers/wizard")
@@ -302,7 +302,7 @@ async def server_wizard_run(request: Request,
     result = await asyncio.to_thread(server_installer.install_new_server, ip, int(ssh_port), ssh_password, name)
 
     if not result["ok"]:
-        return templates.TemplateResponse("admin_wizard_result.html", _ctx(
+        return templates.TemplateResponse(request=request, name="admin_wizard_result.html", context=_ctx(
             request, "servers",
             ok=False, ip=ip, name=name, udp_port=result["udp_port"],
             log="\n".join(result["steps"]), error=result["error"]
@@ -312,14 +312,14 @@ async def server_wizard_run(request: Request,
         db.add_server(ip, name, int(ssh_port))
         db.set_server_limit(next((s[0] for s in db.get_all_servers_full() if s[1] == ip), 0) or 0, int(limit))
     except Exception as e:
-        return templates.TemplateResponse("admin_wizard_result.html", _ctx(
+        return templates.TemplateResponse(request=request, name="admin_wizard_result.html", context=_ctx(
             request, "servers",
             ok=False, ip=ip, name=name, udp_port=result["udp_port"],
             log="\n".join(result["steps"]),
             error=f"Нода установлена, но не добавлена в базу: {e}"
         ))
 
-    return templates.TemplateResponse("admin_wizard_result.html", _ctx(
+    return templates.TemplateResponse(request=request, name="admin_wizard_result.html", context=_ctx(
         request, "servers",
         ok=True, ip=ip, name=name, udp_port=result["udp_port"],
         log="\n".join(result["steps"]), error=None
