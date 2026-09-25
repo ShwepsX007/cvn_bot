@@ -1,0 +1,113 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4 mb-4 border-warning" style="border-left:4px solid #ffc107">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h5 class="fw-bold mb-1">🧙‍♂️ Новый VPN-сервер? Запустите мастер установки</h5>
+            <small class="text-muted">Нужен только IP и root-пароль VPS: ключи, установка AmneziaWG, скрипты и занесение в базу — автоматически.</small>
+        </div>
+        <a href="/admin/web/servers/wizard" class="btn btn-warning rounded-pill px-4 fw-bold">🚀 Мастер установки</a>
+        {% if autoupdate %}<span class="badge bg-success ms-2">Автообновление нод: ВКЛ (ежедневно 05:05)</span>
+        {% else %}<span class="badge bg-secondary ms-2">Автообновление нод: выкл (включается в Настройках)</span>{% endif %}
+    </div>
+</div>
+
+{% if update_report %}
+<div class="card card-custom p-4 mb-4">
+    <h6 class="fw-bold mb-2">🗒 Последний отчёт об обновлении нод</h6>
+    <pre class="small rounded-3 p-3 mb-0" style="background:#161b22;color:#e6edf3;white-space:pre-wrap;word-break:break-word;">{{ update_report }}</pre>
+</div>
+{% endif %}
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-3">➕ Добавить сервер вручную (уже установлен)</h5>
+    <form method="post" action="/admin/web/servers/add" class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label small text-muted">IP-адрес</label>
+            <input type="text" name="ip" class="form-control" placeholder="напр. 203.0.113.10" required>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small text-muted">Название (локация)</label>
+            <input type="text" name="name" class="form-control" placeholder="напр. 🇳🇱 Нидерланды" required>
+        </div>
+        <div class="col-md-1">
+            <label class="form-label small text-muted">🎁 сайт-only</label>
+            <div class="form-check form-switch mt-1">
+                <input class="form-check-input" type="checkbox" name="is_free" id="add_is_free" title="Бесплатная нода для страницы /free - в боте не показывается">
+            </div>
+        </div>
+        <div class="col-md-1">
+            <label class="form-label small text-muted">SSH-порт</label>
+            <input type="number" name="port" class="form-control" value="2222" required>
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-success w-100 rounded-pill">Добавить</button>
+        </div>
+    </form>
+    <small class="text-muted d-block mt-2">На сервере должен быть развернут AmneziaWG со скриптами add_user.sh / remove_user.sh и настройкой SSH.</small>
+</div>
+
+{% for s in servers %}
+<div class="card card-custom p-4 mb-3">
+    <form method="post" action="/admin/web/servers/update">
+        <input type="hidden" name="server_id" value="{{ s.id }}">
+        <div class="d-flex justify-content-between flex-wrap gap-2 mb-3">
+            <div>
+                <b>#{{ s.id }} · <code>{{ s.ip }}</code>:{{ s.port }}</b>
+                <span class="badge {{ 'bg-success' if s.active else 'bg-secondary' }} ms-1">{{ 'активен' if s.active else 'выключен' }}</span>
+                {% if free_flags.get(s.id) %}<span class="badge bg-info ms-1" title="Бесплатная нода: выдается только на сайте /free, в Telegram не показывается">🎁 сайт-only</span>{% endif %}
+                <small class="text-muted ms-2">занято мест: {{ s.paid }}/{{ s.limit }} · подписок: {{ s.subs_total }} (акт. {{ s.subs_active }})</small>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm rounded-pill">💾 Сохранить</button>
+                {% if s.active %}
+                <button type="submit" formaction="/admin/web/servers/delete" name="mode" value="disable" class="btn btn-outline-warning btn-sm rounded-pill"
+                        title="Убрать из продажи (конфиги продолжат работать)"
+                        onclick="return confirm('Выключить сервер #{{ s.id }} — убрать из продажи? Выданные конфиги продолжат работать до истечения.')">⏸ Выкл</button>
+                {% endif %}
+                <button type="submit" formaction="/admin/web/servers/awg-update" class="btn btn-outline-info btn-sm rounded-pill"
+                        title="Обновить контейнер AmneziaWG на ноде до свежей сборки. Конфиги клиентов не слетят и перекачивать их не нужно."
+                        onclick="return confirm('Обновить контейнер AWG на ноде {{ s.ip }} до свежей сборки?\n\nДаунтайм ~10 секунд, все выданные конфиги продолжат работать.')">🔄 Обновить AWG</button>
+                <button type="submit" formaction="/admin/web/servers/delete" name="mode" value="permanent" class="btn btn-outline-danger btn-sm rounded-pill"
+                        title="Удалить из базы насовсем"
+                        onclick="return confirm('УДАЛИТЬ сервер #{{ s.id }} насовсем из базы?\n\nНа нем подписок: {{ s.subs_total }} (активных: {{ s.subs_active }}).\nСама VPN-нода не трогается, выданные конфиги доживут свой срок.')">🗑 Удалить</button>
+            </div>
+        </div>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label small text-muted">Название</label>
+                <input type="text" name="name" class="form-control form-control-sm" value="{{ s.name }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Лимит мест</label>
+                <input type="number" name="max_users" class="form-control form-control-sm" value="{{ s.limit }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Цена 1 день</label>
+                <input type="number" name="price_1d" class="form-control form-control-sm" value="{{ s.price_1d or '' }}" placeholder="глоб.">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Цена 7 дней</label>
+                <input type="number" name="price_7d" class="form-control form-control-sm" value="{{ s.price_7d or '' }}" placeholder="глоб.">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Цена 30 дней</label>
+                <input type="number" name="price_30d" class="form-control form-control-sm" value="{{ s.price_30d or '' }}" placeholder="глоб.">
+            </div>
+            <div class="col-md-1">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="active" value="1" id="act{{ s.id }}" {{ 'checked' if s.active }}>
+                    <label class="form-check-label small" for="act{{ s.id }}">Вкл</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="is_free" id="free{{ s.id }}" {{ 'checked' if free_flags.get(s.id) }}>
+                    <label class="form-check-label small" for="free{{ s.id }}">🎁 сайт</label>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+{% endfor %}
+
+{% endblock %}

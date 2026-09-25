@@ -52,10 +52,52 @@ def init_db():
         ('price_30d', '500'),
         ('admin_contact', '@your_telegram_username'),
         ('manual_payment_details', 'Реквизиты пока не заданы администратором.'),
-        ('site_url', 'https://amneziawg.fun')
+        ('site_url', 'https://amneziawg.fun'),
+        # Автооплата: активный провайдер (off/aipay/platega). По умолчанию выключена.
+        ('payment_provider', 'off'),
+        # ID способа оплаты Platega (в примерах их доков: 2 = СБП QR). Уточняется у менеджера.
+        ('platega_payment_method', '2'),
+        # Отправка писем (регистрация по почте): auto | smtp | resend | off
+        ('mail_mode', 'auto'),
+        ('mail_smtp_host', ''),
+        ('mail_smtp_port', '587'),
+        ('mail_smtp_user', ''),
+        ('mail_smtp_password', ''),
+        ('mail_smtp_tls', 'starttls'),
+        ('mail_from', ''),
+        ('mail_resend_key', ''),
+        # Точка отсчета счетчика оплат в веб-админке («Сбросить счетчик»)
+        ('stats_baseline_count', '0'),
+        ('stats_baseline_sum', '0'),
+        # Ежедневное автообновление контейнера AmneziaWG на всех активных нодах в 05:05 (on/off)
+        ('container_autoupdate', 'off'),
+        # Текст последнего отчета автообновления (показывается на странице «Серверы»)
+        ('node_update_report', ''),
+        # Бесплатный VPN на сайте: срок конфига в часах и напоминание в TG за N минут
+        ('free_hours', '3'),
+        ('free_remind_minutes', '30')
     ]
     cursor.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", default_settings)
     
+    cursor.execute('''CREATE TABLE IF NOT EXISTS free_accesses (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ip TEXT,
+                        server_id INTEGER,
+                        username TEXT,
+                        config_text TEXT,
+                        expires_at TEXT,
+                        active INTEGER DEFAULT 1,
+                        notified INTEGER DEFAULT 0,
+                        tg_id INTEGER,
+                        download_token TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+    # Маркер бесплатного сервера (только сайт). Существующие строки = 0.
+    try:
+        cursor.execute("ALTER TABLE servers ADD COLUMN is_free INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         tg_id INTEGER,
@@ -87,14 +129,8 @@ def init_db():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )''')
                     
-    cursor.execute('''CREATE TABLE IF NOT EXISTS free_trials (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        ip TEXT UNIQUE,
-                        server_id INTEGER,
-                        peer_id TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        expires_at TIMESTAMP
-                    )''')
+        # старая таблица часового сайт-триала упразднена: выдача только через /free (free_accesses)
+    cursor.execute('DROP TABLE IF EXISTS free_trials')
     cursor.execute('''CREATE TABLE IF NOT EXISTS user_profiles (
                         tg_id INTEGER PRIMARY KEY,
                         full_name TEXT,
@@ -121,6 +157,46 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN config_text TEXT")
     except sqlite3.OperationalError:
         pass
+
+    # === УЧЕТНЫЕ ЗАПИСИ ПО ПОЧТЕ (регистрация/вход на сайте без Telegram) ===
+    # tg_id заполняется при привязке (через бота, виджет входа или ссылку-привязку);
+    # одна почта может иметь tg_id, один tg может иметь несколько почт - это не запрещаем.
+    cursor.execute('''CREATE TABLE IF NOT EXISTS email_accounts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT,
+                        tg_id INTEGER,
+                        verified INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+
+    # Одноразовые токены из писем: verify (подтверждение), reset (сброс пароля),
+    # link (привязка почты к tg аккаунту)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS email_tokens (
+                        token TEXT PRIMARY KEY,
+                        email TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        tg_id INTEGER,
+                        expires_at TIMESTAMP NOT NULL,
+                        used INTEGER DEFAULT 0
+                    )''')
+
+    # Одноразовые токены входа в кабинет сайта ЧЕРЕЗ БОТА (deep-link /start web_login):
+    # бот выдает ссылку на {site_url}/auth/bot?token=..., сайт по ней авторизует tg_id.
+    # Нужно потому, что виджет входа Telegram нередко блокируют по IP/в браузерах.
+    cursor.execute('''CREATE TABLE IF NOT EXISTS tg_login_tokens (
+                        token TEXT PRIMARY KEY,
+                        tg_id INTEGER NOT NULL,
+                        expires_at TIMESTAMP NOT NULL,
+                        used INTEGER DEFAULT 0
+                    )''')
+
+    # Администраторы ВЕБ-АДМИНКИ на сайте (главный админ из config.ADMIN_ID сидится отдельно)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS admins (
+                        tg_id INTEGER PRIMARY KEY,
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        added_by INTEGER
+                    )''')
 
     conn.commit()
     conn.close()
@@ -187,13 +263,46 @@ def delete_server(server_id):
     conn.commit()
     conn.close()
 
-def get_active_servers():
+def get_active_servers(include_free=False):
+    """Активные серверы. include_free=False - только продажные (Telegram, кабинет),
+    True - все активные, включая сайтовые бесплатные (нужно обновлям нод, очистке)."""
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, ip, port, name, max_users FROM servers WHERE active=1")
+    sql = "SELECT id, ip, port, name, max_users FROM servers WHERE active=1"
+    if not include_free:
+        sql += " AND (is_free IS NULL OR is_free = 0)"
+    cursor.execute(sql)
     servers = cursor.fetchall()
     conn.close()
     return servers
+
+def get_active_free_servers():
+    """Бесплатные ноды - их выбирает пользователь только на сайте (/free)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, ip, port, name, max_users FROM servers WHERE active=1 AND is_free=1")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def set_server_free(server_id, flag):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE servers SET is_free=? WHERE id=?", (1 if flag else 0, server_id))
+    conn.commit()
+    conn.close()
+
+def get_server_free_flags():
+    """{server_id: bool} для отметок в админке."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, is_free FROM servers")
+        flags = {r[0]: bool(r[1]) for r in cursor.fetchall()}
+    except sqlite3.OperationalError:
+        flags = {}
+    conn.close()
+    return flags
 
 def get_server_by_id(server_id):
     conn = get_conn()
@@ -309,6 +418,304 @@ def set_user_config(tg_id, server_id, config_text):
     cursor.execute("UPDATE users SET config_text=? WHERE tg_id=? AND server_id=?", (config_text, tg_id, server_id))
     conn.commit()
     conn.close()
+
+
+# --- УЧЕТНЫЕ ЗАПИСИ ПО ПОЧТЕ (email_accounts / email_tokens) ---
+def create_email_account(email, password_hash=None, tg_id=None, verified=0):
+    """Создает почтовую учетку. Возвращает id или None, если email уже занят."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO email_accounts (email, password_hash, tg_id, verified) VALUES (?, ?, ?, ?)",
+            (email, password_hash, tg_id, verified)
+        )
+        acc_id = cursor.lastrowid
+        conn.commit()
+        return acc_id
+    except sqlite3.IntegrityError:
+        return None
+    finally:
+        conn.close()
+
+def get_email_account(email):
+    """Ряд (id, email, password_hash, tg_id, verified) или None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email, password_hash, tg_id, verified FROM email_accounts WHERE email=?", (email,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def get_email_account_by_tg(tg_id):
+    """Ряд (id, email, password_hash, tg_id, verified) первой привязанной к tg почты или None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email, password_hash, tg_id, verified FROM email_accounts WHERE tg_id=? LIMIT 1", (tg_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def set_email_password(email, password_hash):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE email_accounts SET password_hash=? WHERE email=?", (password_hash, email))
+    conn.commit()
+    conn.close()
+
+def mark_email_verified(email):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE email_accounts SET verified=1 WHERE email=?", (email,))
+    conn.commit()
+    conn.close()
+
+def bind_email_to_tg(email, tg_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE email_accounts SET tg_id=? WHERE email=?", (tg_id, email))
+    conn.commit()
+    conn.close()
+
+def create_email_token(email, kind, tg_id, ttl_seconds):
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(24)
+    expires = (datetime.now() + timedelta(seconds=ttl_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO email_tokens (token, email, kind, tg_id, expires_at) VALUES (?, ?, ?, ?, ?)",
+        (token, email, kind, tg_id, expires)
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+def _fresh_token_row(cursor, token, kind):
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute(
+        "SELECT email, tg_id FROM email_tokens WHERE token=? AND kind=? AND used=0 AND expires_at > ?",
+        (token, kind, now)
+    )
+    return cursor.fetchone()
+
+def peek_email_token(token, kind):
+    """(email, tg_id) если токен жив, иначе None. Токен НЕ расходуется (для предпросмотра форм)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    row = _fresh_token_row(cursor, token, kind)
+    conn.close()
+    return row
+
+def consume_email_token(token, kind):
+    """(email, tg_id) если токен был жив - и он помечен использованным; иначе None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    row = _fresh_token_row(cursor, token, kind)
+    if row:
+        cursor.execute("UPDATE email_tokens SET used=1 WHERE token=?", (token,))
+        conn.commit()
+    conn.close()
+    return row
+
+
+# --- ОДНОРАЗОВЫЕ ТОКЕНЫ ВХОДА НА САЙТ ЧЕРЕЗ БОТА (tg_login_tokens) ---
+def create_tg_login_token(tg_id, ttl_seconds=600):
+    """Ссылка на вход в кабинет, выданная ботом. Живет 10 минут, одноразовая."""
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(24)
+    expires = (datetime.now() + timedelta(seconds=ttl_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO tg_login_tokens (token, tg_id, expires_at) VALUES (?, ?, ?)",
+        (token, tg_id, expires)
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+def consume_tg_login_token(token):
+    """tg_id если токен был жив (и сразу расходуется); иначе None."""
+    if not token:
+        return None
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT tg_id FROM tg_login_tokens WHERE token=? AND used=0 AND expires_at > ?",
+        (token, now)
+    )
+    row = cursor.fetchone()
+    if row:
+        cursor.execute("UPDATE tg_login_tokens SET used=1 WHERE token=?", (token,))
+        conn.commit()
+    conn.close()
+    return row[0] if row else None
+
+
+# --- АДМИНИСТРАТОРЫ ВЕБ-АДМИНКИ (таблица admins) ---
+def list_admins():
+    """Ряды (tg_id, added_at, added_by)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT tg_id, added_at, added_by FROM admins ORDER BY added_at")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def is_admin_user(tg_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM admins WHERE tg_id=?", (tg_id,))
+    ok = cursor.fetchone() is not None
+    conn.close()
+    return ok
+
+def add_admin(tg_id, added_by=None):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO admins (tg_id, added_by) VALUES (?, ?)", (tg_id, added_by))
+    conn.commit()
+    conn.close()
+
+def remove_admin(tg_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM admins WHERE tg_id=?", (tg_id,))
+    conn.commit()
+    conn.close()
+
+
+# --- СВОДКИ ДЛЯ ВЕБ-АДМИНКИ ---
+def get_all_profiles():
+    """Все профили: (tg_id, full_name, username, last_active, accepted_tos, всего подписок, активных)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute('''SELECT p.tg_id, p.full_name, p.username, p.last_active, p.accepted_tos,
+                        (SELECT COUNT(*) FROM users u WHERE u.tg_id = p.tg_id),
+                        (SELECT COUNT(*) FROM users u WHERE u.tg_id = p.tg_id AND u.active = 1)
+                      FROM user_profiles p ORDER BY p.last_active DESC''')
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_pending_detail_requests():
+    """Заявки на реквизиты со статусом pending: (id, tg_id, server_id, period, created_at)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, tg_id, server_id, period, created_at FROM detail_requests WHERE status='pending' ORDER BY created_at"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_pending_manual_orders():
+    """Заказы по чеку со статусом pending: (id, tg_id, server_id, period, amount, created_at)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(manual_orders)")
+    cols = [c[1] for c in cursor.fetchall()]
+    conn.close()
+    created = "created_at" if "created_at" in cols else "id"
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"SELECT id, tg_id, server_id, period, amount, {created} FROM manual_orders WHERE status='pending' ORDER BY {created}"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_all_settings():
+    """Все настройки: список (key, value) в алфавитном порядке."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT key, value FROM settings ORDER BY key")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_paid_revenue():
+    """(кол-во оплаченных заказов, сумма руб.) по таблицам orders и manual_orders."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*), IFNULL(SUM(amount),0) FROM orders WHERE status='paid'")
+    c1, s1 = cursor.fetchone()
+    try:
+        cursor.execute("SELECT COUNT(*), IFNULL(SUM(amount),0) FROM manual_orders WHERE status='paid'")
+        c2, s2 = cursor.fetchone()
+    except sqlite3.OperationalError:
+        c2, s2 = (0, 0)
+    conn.close()
+    return int(c1 or 0) + int(c2 or 0), int(s1 or 0) + int(s2 or 0)
+
+def count_active_subs():
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE active=1")
+    n = cursor.fetchone()[0]
+    conn.close()
+    return int(n or 0)
+
+def get_paid_revenue_display():
+    """(кол-во, сумма) оплаченных заказов с учетом baseline-смещения
+    (кнопка «Сбросить счетчик оплат» в веб-админке просто фиксирует текущие
+    значения как baseline - история самих заказов не удаляется)."""
+    cnt, total = get_paid_revenue()
+    base_cnt = int(get_setting("stats_baseline_count") or 0)
+    base_sum = int(get_setting("stats_baseline_sum") or 0)
+    return max(0, cnt - base_cnt), max(0, total - base_sum)
+
+def reset_revenue_baseline():
+    """Зафиксировать текущее значение счетчика как нулевую точку отсчета."""
+    cnt, total = get_paid_revenue()
+    update_setting("stats_baseline_count", str(cnt))
+    update_setting("stats_baseline_sum", str(total))
+    return cnt, total
+
+def clear_revenue_baseline():
+    """Вернуть показ полного счетчика за все время."""
+    update_setting("stats_baseline_count", "0")
+    update_setting("stats_baseline_sum", "0")
+
+def get_all_servers_full():
+    """Все серверы (и неактивные): (id, ip, port, active, name, max_users, price_1d, price_7d, price_30d)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, ip, port, active, name, max_users, price_1d, price_7d, price_30d FROM servers ORDER BY id")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def set_server_active(server_id, active):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE servers SET active=? WHERE id=?", (1 if active else 0, server_id))
+    conn.commit()
+    conn.close()
+
+def delete_server_permanently(server_id):
+    """Полное удаление сервера из базы (в отличие от delete_server, который только выключает).
+    Сама VPN-нода при этом не трогается: выданные конфиги продолжат работать до истечения."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM servers WHERE id=?", (server_id,))
+    conn.commit()
+    conn.close()
+
+def count_server_subs(server_id, only_active=False):
+    """Сколько подписок (исторически / активных) завязано на сервер - для предупреждения при удалении."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    if only_active:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE server_id=? AND active=1", (server_id,))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE server_id=?", (server_id,))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return int(n or 0)
 
 
 def get_expired_users():
@@ -508,37 +915,101 @@ def fail_order_by_uid(aipay_uid, status_name="failed"):
     return changed
 
 # --- Веб-триалы ---
-def add_free_trial(ip, server_id, peer_id, expires_at):
+# --- Бесплатные сайтовые доступы (страница /free) ---
+def _utcnow_str():
+    return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+def free_get_active_by_ip(ip):
+    """Активная (не истекшая) бесплатная запись для IP, иначе None.
+    Кортеж: (id, server_id, username, config_text, expires_at, active, notified, tg_id, download_token)."""
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO free_trials (ip, server_id, peer_id, expires_at) VALUES (?, ?, ?, ?)", (ip, server_id, peer_id, expires_at))
-    conn.commit()
-    conn.close()
-    
-def get_recent_trial_by_ip(ip, time_limit):
-    conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute("SELECT created_at FROM free_trials WHERE ip = ? AND created_at > ?", (ip, time_limit))
+    cursor.execute(
+        "SELECT id, server_id, username, config_text, expires_at, active, notified, tg_id, download_token "
+        "FROM free_accesses WHERE ip=? AND active=1 AND expires_at > ? ORDER BY id DESC",
+        (ip, _utcnow_str()))
     row = cursor.fetchone()
     conn.close()
     return row
 
-def get_expired_trials():
+def free_create_access(ip, server_id, username, config_text, expires_at, tg_id=None, download_token=None):
     conn = get_conn()
     cursor = conn.cursor()
-    now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute("SELECT id, server_id, peer_id FROM free_trials WHERE expires_at < ?", (now_str,))
+    cursor.execute(
+        "INSERT INTO free_accesses (ip, server_id, username, config_text, expires_at, active, tg_id, download_token) "
+        "VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+        (ip, server_id, username, config_text, expires_at, tg_id, download_token))
+    row_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
+
+def free_renew_access(access_id, expires_at):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE free_accesses SET expires_at=?, notified=0 WHERE id=?", (expires_at, access_id))
+    conn.commit()
+    conn.close()
+
+def free_count_active_on_server(server_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM free_accesses WHERE server_id=? AND active=1 AND expires_at > ?",
+        (server_id, _utcnow_str()))
+    cnt = cursor.fetchone()[0]
+    conn.close()
+    return cnt
+
+def free_get_by_token(token):
+    """Строка по токену скачивания: (id, server_id, username, config_text, expires_at, active)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, server_id, username, config_text, expires_at, active FROM free_accesses WHERE download_token=? AND active=1",
+        (token,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def free_get_expired():
+    """Активные, но истекшие записи - их пора отключить на ноде."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, server_id, username FROM free_accesses WHERE active=1 AND expires_at <= ?", (_utcnow_str(),))
     rows = cursor.fetchall()
     conn.close()
     return rows
 
-def delete_free_trial(trial_id):
+def free_deactivate(access_id):
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM free_trials WHERE id=?", (trial_id,))
+    cursor.execute("UPDATE free_accesses SET active=0 WHERE id=?", (access_id,))
     conn.commit()
     conn.close()
-    
+
+def free_get_due_reminders(minutes):
+    """Активные доступы с tg_id, которым скоро истечь и о которых ещё не напомнили."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    now = _utcnow_str()
+    until = (datetime.utcnow() + timedelta(minutes=minutes)).strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute(
+        "SELECT id, tg_id, server_id, expires_at FROM free_accesses "
+        "WHERE active=1 AND notified=0 AND tg_id IS NOT NULL AND expires_at > ? AND expires_at <= ?",
+        (now, until))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def free_mark_notified(access_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE free_accesses SET notified=1 WHERE id=?", (access_id,))
+    conn.commit()
+    conn.close()
+
+# --- Текущие триал-страницы сайта (старый API получения 1-часового конфига) ---
 def get_inactive_users_30d():
     conn = get_conn()
     cursor = conn.cursor()

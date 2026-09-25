@@ -5,14 +5,19 @@ from datetime import datetime
 from aiogram import Router, F, BaseMiddleware
 from aiogram.types import Message, CallbackQuery, BufferedInputFile, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, TelegramObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram import html
 
+import asyncio
+
 import database as db
 import ssh_manager as ssh
-import aipay
+import payments
+import qrgen
+import emailauth
+import mailer
 from config import ADMIN_ID
 
 user_router = Router()
@@ -93,6 +98,9 @@ class SupportStates(StatesGroup):
 class BuyStates(StatesGroup):
     waiting_for_receipt = State()
 
+class EmailLinkStates(StatesGroup):
+    waiting_for_email = State()
+
 main_reply_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="🚀 Главное меню")]], 
     resize_keyboard=True,
@@ -102,12 +110,17 @@ main_reply_kb = ReplyKeyboardMarkup(
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="🛍 Купить / Продлить VPN", callback_data="usr_buy_choose_srv"))
+    builder.add(InlineKeyboardButton(
+        text="🎁 VPN бесплатно",
+        url=(db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")))
+    builder.add(InlineKeyboardButton(text="🔑 Мои конфиги", callback_data="usr_my_configs"))
     builder.add(InlineKeyboardButton(text="👤 Мой профиль", callback_data="usr_profile"))
+    builder.add(InlineKeyboardButton(text="📧 Привязать почту", callback_data="usr_link_email"))
     builder.add(InlineKeyboardButton(text="ℹ️ Описание и условия", callback_data="usr_description"))
     builder.add(InlineKeyboardButton(text="📚 Инструкция по настройке", callback_data="usr_help"))
     builder.add(InlineKeyboardButton(text="🤝 Поддержка", callback_data="usr_support"))
     builder.add(InlineKeyboardButton(text="📜 Соглашение и Политика", callback_data="usr_tos"))
-    builder.adjust(1, 1, 1, 2, 1)
+    builder.adjust(1, 1, 1, 1, 2, 2)
     return builder.as_markup()
 
 async def check_and_clean_expired(tg_id: int):
@@ -136,7 +149,7 @@ async def check_and_clean_expired(tg_id: int):
 # --- Хендлеры ---
 
 @user_router.message(Command("start"))
-async def start_cmd(message: Message, state: FSMContext):
+async def start_cmd(message: Message, state: FSMContext, command: CommandObject):
     await state.clear() 
     
     try:
@@ -147,6 +160,22 @@ async def start_cmd(message: Message, state: FSMContext):
         )
     except Exception as e:
         print(f"Ошибка сохранения профиля: {e}")
+
+    # Deep-link со страницы входа сайта (кнопка «Войти через бота»):
+    # пользователь уже опознан по tg id, выдаем одноразовую ссылку на вход в кабинет.
+    # Работает всегда, в отличие от виджета Telegram, который часто блокируют.
+    if command.args and command.args.strip() in ("web_login", "webreg"):
+        token = db.create_tg_login_token(message.from_user.id, ttl_seconds=600)
+        site_url = (db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(text="🔓 Открыть личный кабинет", url=f"{site_url}/auth/bot?token={token}"))
+        await message.answer(
+            "🔓 <b>Вход в личный кабинет на сайте</b>\n\n"
+            "Нажмите кнопку ниже — вы сразу попадете в свой кабинет.\n"
+            "Ссылка одноразовая и действует 10 минут. Если не успели — нажмите /start еще раз.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
 
     profile = db.get_user_profile(message.from_user.id)
     if not profile or len(profile) <= 3 or profile[3] == 0:
@@ -170,6 +199,152 @@ async def main_menu_btn(message: Message, state: FSMContext):
 async def user_menu_cb(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("Выберите интересующий раздел меню:", reply_markup=get_main_keyboard())
+
+# --- МОИ КОНФИГИ: повторная выдача файла и QR-кода в любое время ---
+# ==================== ПРИВЯЗКА ПОЧТЫ ИЗ БОТА ====================
+@user_router.callback_query(F.data == "usr_link_email")
+async def link_email_start(callback: CallbackQuery, state: FSMContext):
+    tg_id = callback.from_user.id
+    acc = db.get_email_account_by_tg(tg_id)
+
+    if not mailer.is_configured():
+        text = (
+            "📧 Привязка почты пока недоступна — почтовая отправка не настроена на сервере.\n"
+            "Попробуйте позже."
+        )
+        builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+        return await callback.message.edit_text(text, reply_markup=builder.as_markup())
+
+    if acc and acc[4]:
+        text = (
+            f"📧 К вашему аккаунту уже привязана почта:\n<b>{html.quote(acc[1])}</b>\n\n"
+            "По ней можно входить в личный кабинет на сайте (вкладка «Почта»).\n"
+            "Хотите заменить на другую? Просто отправьте новый адрес."
+        )
+    elif acc:
+        text = (
+            f"📧 Вы начали привязку почты <b>{html.quote(acc[1])}</b>, но не подтвердили её по ссылке из письма.\n\n"
+            "Отправьте адрес еще раз — пришлем новое письмо."
+        )
+    else:
+        text = (
+            "📧 <b>Привязка почты</b>\n\n"
+            "Отправьте адрес электронной почты. На него придет письмо со ссылкой — "
+            "перейдите по ней, и почта привяжется к этому аккаунту.\n\n"
+            "Зачем: вход в личный кабинет на сайте по логину/паролю и восстановление доступа, "
+            "даже если Telegram недоступен.\n\n"
+            "Отмена: /start"
+        )
+    builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+    await state.set_state(EmailLinkStates.waiting_for_email)
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@user_router.message(EmailLinkStates.waiting_for_email)
+async def link_email_process(message: Message, state: FSMContext):
+    tg_id = message.from_user.id
+    email = emailauth.normalize_email(message.text)
+
+    if not emailauth.valid_email(email):
+        return await message.answer(
+            "⚠️ Это не похоже на адрес почты. Попробуйте еще раз (например, name@gmail.com) или отмените: /start"
+        )
+
+    acc = db.get_email_account(email)
+    if acc and acc[3] and acc[3] != tg_id:
+        await state.clear()
+        return await message.answer(
+            "⚠️ Эта почта уже привязана к другому Telegram-аккаунту. Если это вы — "
+            "войдите с того аккаунта или напишите в поддержку."
+        )
+
+    if not acc:
+        # Этап 1: аккаунт без пароля - пароль пользователь задаст сразу после подтверждения ссылки
+        if db.create_email_account(email, tg_id=tg_id, verified=0) is None:
+            await state.clear()
+            return await message.answer("⚠️ Эта почта уже занята другим аккаунтом.")
+
+    token = emailauth.issue_token(email, "link", tg_id)
+    ok, err = await asyncio.to_thread(mailer.send_token_mail, "link", email, token)
+    if not ok:
+        print(f"Ошибка отправки письма привязки на {email}: {err}")
+        return await message.answer(
+            "❌ Не удалось отправить письмо. Возможно, почтовый сервис временно недоступен — попробуйте позже."
+        )
+
+    await state.clear()
+    await message.answer(
+        f"✅ Письмо отправлено на <b>{html.quote(email)}</b>!\n\n"
+        "Перейдите по ссылке из письма (действует 2 часа) — почта привяжется к аккаунту. "
+        "Сразу после этого сайт предложит задать пароль для входа в кабинет.",
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard()
+    )
+
+@user_router.callback_query(F.data == "usr_my_configs")
+async def my_configs(callback: CallbackQuery):
+    await check_and_clean_expired(callback.from_user.id)
+    tg_id = callback.from_user.id
+    subs = db.get_user_subs(tg_id)
+    active_subs = [s for s in subs if s[5] == 1]
+
+    if not active_subs:
+        text = "🔑 У вас пока нет активных подписок. Оформите их в разделе «🛍 Купить / Продлить VPN»."
+        builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+        return await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+    text = (
+        "🔑 <b>МОИ КОНФИГУРАЦИИ</b>\n\n"
+        "Выберите сервер — пришлю файл <code>.conf</code> и QR-код для быстрого подключения телефона с экрана компьютера:"
+    )
+    builder = InlineKeyboardBuilder()
+    for sub in active_subs:
+        t_id, s_id, uname, exp_date_str, has_trial, active, is_trial, notif, last_exp = sub
+        srv = db.get_server_by_id(s_id)
+        srv_name = srv[2] if srv else f"Сервер {s_id}"
+        has_cfg = bool(db.get_user_config(tg_id, s_id))
+        mark = "🔑" if has_cfg else "🔄"  # 🔄 - конфиг не сохранен, будет перевыпущен
+        builder.add(InlineKeyboardButton(text=f"{mark} {srv_name}", callback_data=f"mycfg_get_{s_id}"))
+    builder.add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+    builder.adjust(1)
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@user_router.callback_query(F.data.startswith("mycfg_get_"))
+async def mycfg_get(callback: CallbackQuery):
+    s_id = int(callback.data.replace("mycfg_get_", ""))
+    tg_id = callback.from_user.id
+
+    sub = db.get_user_sub(tg_id, s_id)
+    if not sub or sub[5] != 1:
+        return await callback.answer("Подписка не найдена или уже неактивна.", show_alert=True)
+
+    srv = db.get_server_by_id(s_id)
+    srv_name = srv[2] if srv else f"Сервер {s_id}"
+
+    config_text = db.get_user_config(tg_id, s_id)
+    if not config_text:
+        # Старая подписка без сохраненного конфига - перевыпускаем на актуальной версии сервера
+        await callback.answer("Конфиг не сохранен — перевыпускаю новый...", show_alert=False)
+        success, msg = await reissue_config_for_active_sub(callback.bot, tg_id, s_id)
+        if not success:
+            await callback.message.answer(
+                f"❌ Не удалось перевыпустить конфиг:\n<code>{html.quote(str(msg))}</code>",
+                parse_mode="HTML"
+            )
+        return
+
+    config_file = BufferedInputFile(config_text.encode("utf-8"), filename=f"ID{s_id}AWG.conf")
+    await callback.message.answer_document(
+        config_file,
+        caption=f"🔑 Ваш конфиг — сервер <b>{html.quote(srv_name)}</b>. Импортируйте файл в приложение AmneziaWG.",
+        parse_mode="HTML"
+    )
+    qr_png = qrgen.make_qr_png(config_text)
+    if qr_png:
+        await callback.message.answer_photo(
+            BufferedInputFile(qr_png, filename="vpn_qr.png"),
+            caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
+        )
+    await callback.answer()
 
 @user_router.callback_query(F.data == "usr_profile")
 async def show_profile(callback: CallbackQuery):
@@ -293,14 +468,23 @@ async def buy_menu(callback: CallbackQuery):
 @user_router.callback_query(F.data.startswith("pay_req_"))
 async def ask_for_details_prompt(callback: CallbackQuery):
     _, _, s_id, period = callback.data.split("_")
-    text = (
-        "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
-        "⚡️ <b>Оплата картой (авто)</b> — доступ выдается автоматически сразу после оплаты.\n"
-        "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
-        "<i>Выберите удобный способ оплаты.</i>"
-    )
+    auto_enabled = payments.is_auto_pay_enabled()
+    if auto_enabled:
+        text = (
+            "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
+            "⚡️ <b>Оплата картой (авто)</b> — доступ выдается автоматически сразу после оплаты.\n"
+            "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
+            "<i>Выберите удобный способ оплаты.</i>"
+        )
+    else:
+        text = (
+            "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
+            "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
+            "<i>⚡️ Автоматическая оплата картой временно недоступна.</i>"
+        )
     builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="⚡️ Оплатить картой (авто)", callback_data=f"autopay_{s_id}_{period}"))
+    if auto_enabled:
+        builder.add(InlineKeyboardButton(text="⚡️ Оплатить картой (авто)", callback_data=f"autopay_{s_id}_{period}"))
     builder.add(InlineKeyboardButton(text="📥 Запрос реквизитов", callback_data=f"ask_det_{s_id}_{period}"))
     builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"buy_srv_{s_id}"))
     builder.adjust(1)
@@ -311,6 +495,12 @@ async def autopay_create(callback: CallbackQuery):
     _, s_id_str, period = callback.data.split("_")
     s_id = int(s_id_str)
     tg_id = callback.from_user.id
+
+    if not payments.is_auto_pay_enabled():
+        return await callback.answer(
+            "Автоматическая оплата временно отключена. Воспользуйтесь запросом реквизитов.",
+            show_alert=True
+        )
 
     server = db.get_server_by_id(s_id)
     if not server:
@@ -323,7 +513,9 @@ async def autopay_create(callback: CallbackQuery):
     await callback.answer("⏳ Создаю платеж...")
 
     try:
-        payment_url, uid = await aipay.create_order(amount, "RUB")
+        payment_url, uid = await payments.create_order(
+            amount, "RUB", tg_id=tg_id, username=callback.from_user.username
+        )
     except Exception as e:
         await callback.message.answer(
             f"❌ Не удалось создать автоматический платеж. Попробуйте позже или воспользуйтесь ручной оплатой.\n\n"
@@ -363,13 +555,13 @@ async def autopay_check_status(callback: CallbackQuery):
         return await callback.answer("❌ Этот платеж не был завершен (отменен или произошла ошибка).", show_alert=True)
 
     try:
-        remote_status = await aipay.get_order_status(uid)
+        remote_status = await payments.get_order_status(uid)
     except Exception:
         return await callback.answer("Не удалось проверить статус, попробуйте чуть позже.", show_alert=True)
 
     status_id = remote_status.get("id")
 
-    if status_id == aipay.STATUS_SUCCESS:
+    if status_id == payments.STATUS_SUCCESS:
         if db.complete_order_by_uid(uid):
             await callback.answer("✅ Оплата подтверждена! Выдаю доступ...", show_alert=True)
             success, msg = await issue_vpn_access(callback.bot, tg_id, s_id, period, notify_admin=True)
@@ -381,8 +573,8 @@ async def autopay_check_status(callback: CallbackQuery):
                 )
         else:
             await callback.answer("✅ Оплата уже была подтверждена ранее.", show_alert=True)
-    elif status_id in (aipay.STATUS_ERROR, aipay.STATUS_CANCELLED):
-        db.fail_order_by_uid(uid, "failed" if status_id == aipay.STATUS_ERROR else "cancelled")
+    elif status_id in (payments.STATUS_ERROR, payments.STATUS_CANCELLED):
+        db.fail_order_by_uid(uid, "failed" if status_id == payments.STATUS_ERROR else "cancelled")
         await callback.answer("❌ Платеж не завершен (ошибка или отмена).", show_alert=True)
     else:
         await callback.answer("⏳ Оплата еще не подтверждена. Попробуйте через минуту.", show_alert=True)
@@ -601,6 +793,18 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
     except Exception:
         pass
 
+    # QR-код того же конфига - удобно импортировать на телефон, не пересылая файл
+    qr_png = qrgen.make_qr_png(config_text)
+    if qr_png:
+        try:
+            await bot.send_photo(
+                tg_id,
+                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
+            )
+        except Exception:
+            pass
+
     return True, config_text
 
 async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
@@ -666,6 +870,17 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
         await bot.send_document(tg_id, config_file, caption=caption, parse_mode="HTML")
     except Exception: pass
 
+    # QR-код того же конфига - удобно импортировать на телефон, не пересылая файл
+    qr_png = qrgen.make_qr_png(config_text)
+    if qr_png:
+        try:
+            await bot.send_photo(
+                tg_id,
+                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
+            )
+        except Exception: pass
+
     await _notify_admin_grant(bot, tg_id, srv_name, period, renewed=False, notify_admin=notify_admin)
     return True, config_text
 
@@ -674,7 +889,7 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
     Уведомляет администратора о выдаче доступа - только в случаях, когда у админа иначе
     НЕТ видимости происходящего:
       - пробный период (self-service, никакого одобрения не требуется) - уведомляем ВСЕГДА;
-      - автооплата картой (AiPay) - уведомляем, если вызывающий код передал notify_admin=True
+      - автооплата картой (провайдер из payments.py) - уведомляем, если вызывающий код передал notify_admin=True
         (вебхук / поллинг статуса оплаты).
     Ручную оплату здесь не дублируем - админ и так видит это сразу же после нажатия
     "Подтвердить" в confirm_manual_order().
@@ -689,7 +904,7 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
         period_label = {"1d": "1 день", "7d": "7 дней", "30d": "30 дней"}.get(period, period)
         action_label = "Продление подписки" if renewed else "Новая оплата"
         text = (
-            f"💳 <b>{action_label} картой (AiPay)!</b>\n\n"
+            f"💳 <b>{action_label} картой (авто)!</b>\n\n"
             f"Пользователь: <code>{tg_id}</code>\n"
             f"Сервер: <b>{srv_name}</b>\n"
             f"Период: {period_label}"

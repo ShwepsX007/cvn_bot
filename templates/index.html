@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -35,6 +35,7 @@
         .app-icon { font-size: 2.5rem; margin-bottom: 15px; }
         .server-badge { font-size: 0.9rem; padding: 8px 12px; }
     </style>
+    <link rel="stylesheet" href="/static/dark-theme.css">
 </head>
 <body>
 
@@ -45,42 +46,15 @@
             <p class="lead mb-4">Надежный обход блокировок с протоколом AmneziaWG. Высокая скорость, никакой рекламы и полная анонимность.</p>
             
             <div class="d-flex justify-content-center gap-3 flex-wrap">
-                <button class="btn btn-warning btn-lg px-4 fw-bold rounded-pill text-dark shadow-sm" onclick="openTrialModal()">
-                    ⚡ VPN на 1 час Скачать.conf
-                </button>
+                <a href="/free" class="btn btn-warning btn-lg px-4 fw-bold rounded-pill text-dark shadow-sm">
+                    🎁 Бесплатный VPN
+                </a>
                 <a href="https://t.me/AWGvpn_bot" class="btn btn-light btn-lg px-4 fw-bold text-primary rounded-pill shadow-sm">
                     🤖 Перейти в Telegram-бот
                 </a>
                 <a href="/login" class="btn btn-outline-light btn-lg px-4 fw-bold rounded-pill">
                     🔐 Личный кабинет
                 </a>
-            </div>
-        </div>
-    </div>
-
-    <!-- Модальное окно с капчей -->
-    <div class="modal fade" id="trialModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content rounded-4 border-0 shadow">
-                <div class="modal-header border-0 pb-0">
-                    <h5 class="modal-title fw-bold">Временный доступ AmneziaWG</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body py-4">
-                    <p class="text-muted small">Этот конфиг активен ровно 1 час. Он нужен исключительно для того, чтобы вы могли запустить VPN для полноценного подключения. Не забудьте скачать приложение для подключения.</p>
-                    <p class="text-danger small fw-bold">⚠️ Доступно только 1 раз в 12 часов для одного IP-адреса.</p>
-                    <hr>
-                    <div class="mb-3 text-center">
-                        <label class="form-label fw-bold mb-2">Подтвердите, что вы не робот:</label>
-                        <h3 class="text-primary fw-bold mb-3" id="captcha-question">Загрузка...</h3>
-                        <input type="hidden" id="captcha-id">
-                        <input type="number" class="form-control form-control-lg text-center rounded-pill" id="captcha-answer" placeholder="Введите ответ (только цифры)">
-                    </div>
-                    <div id="trial-error" class="alert alert-danger d-none rounded-3 py-2 text-center small"></div>
-                </div>
-                <div class="modal-footer border-0 pt-0 justify-content-center">
-                    <button type="button" class="btn btn-primary rounded-pill px-5 fw-bold btn-lg w-100" onclick="requestTrialConfig()">Скачать TWG.conf</button>
-                </div>
             </div>
         </div>
     </div>
@@ -151,81 +125,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        let myModal;
-
-        document.addEventListener("DOMContentLoaded", function() {
-            myModal = new bootstrap.Modal(document.getElementById('trialModal'));
-        });
-
-        async function openTrialModal() {
-            document.getElementById('trial-error').classList.add('d-none');
-            document.getElementById('captcha-answer').value = '';
-            await loadCaptcha();
-            myModal.show();
-        }
-
-        async function loadCaptcha() {
-            try {
-                const res = await fetch('/api/captcha');
-                const data = await res.json();
-                document.getElementById('captcha-question').innerText = data.question;
-                document.getElementById('captcha-id').value = data.captcha_id;
-            } catch (err) {
-                document.getElementById('captcha-question').innerText = "Ошибка загрузки капчи";
-            }
-        }
-
-        // --- ИСПРАВЛЕННАЯ НАДЁЖНАЯ ФУНКЦИЯ СКАЧИВАНИЯ ---
-        async function requestTrialConfig() {
-            const captchaId = document.getElementById('captcha-id').value;
-            const answer = document.getElementById('captcha-answer').value;
-            const errorDiv = document.getElementById('trial-error');
-            
-            errorDiv.classList.add('d-none');
-
-            if (!answer) {
-                errorDiv.innerText = "Пожалуйста, введите ответ.";
-                errorDiv.classList.remove('d-none');
-                return;
-            }
-
-            const btn = document.querySelector('#trialModal .btn-primary');
-            const originalText = btn.innerText;
-            btn.innerText = "Генерация конфига...";
-            btn.disabled = true;
-
-            try {
-                // Шаг 1: Запрашиваем временный токен
-                const response = await fetch('/api/get-trial-token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ captcha_id: captchaId, answer: answer })
-                });
-
-                if (!response.ok) {
-                    const errData = await response.json();
-                    throw new Error(errData.detail || "Произошла ошибка");
-                }
-
-                const data = await response.json();
-                const token = data.token;
-                
-                // Шаг 2: Нативный переход для скачивания (БЕЗОПАСНО ДЛЯ iOS И ANDROID)
-                window.location.href = `/api/download-trial?token=${token}`;
-                
-                myModal.hide();
-
-            } catch (error) {
-                errorDiv.innerText = error.message;
-                errorDiv.classList.remove('d-none');
-                await loadCaptcha();
-                document.getElementById('captcha-answer').value = '';
-            } finally {
-                btn.innerText = originalText;
-                btn.disabled = false;
-            }
-        }
-    </script>
+    <script src="/static/cookie-consent.js"></script>
 </body>
 </html>

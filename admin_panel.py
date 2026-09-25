@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 import database as db
 import ssh_manager as ssh
+import mailer
 from aiogram import html
 from user_handlers import issue_vpn_access
 from config import ADMIN_ID
@@ -27,6 +28,9 @@ class AdminStates(StatesGroup):
     waiting_for_srv_price = State()
     waiting_for_manual_details = State()
     waiting_for_aipay_key = State()
+    waiting_for_mail_value = State()
+    waiting_for_platega_merchant = State()
+    waiting_for_platega_secret = State()
     waiting_for_site_url = State()
 
 def get_admin_keyboard():
@@ -389,28 +393,58 @@ async def view_settings(callback: CallbackQuery):
     p30 = db.get_setting("price_30d")
     aipay_key = db.get_setting("aipay_api_key")
     aipay_status = f"✅ Задан (...{aipay_key[-4:]})" if aipay_key else "❌ Не задан"
+    provider = (db.get_setting("payment_provider") or "off").strip().lower()
+    prov_names = {"off": "❌ Выключена", "aipay": "AiPay (старый)", "platega": "Platega"}
+    prov_status = prov_names.get(provider, provider)
+    platega_mid = db.get_setting("platega_merchant_id")
+    platega_sec = db.get_setting("platega_secret")
+    platega_mid_status = f"✅ Задан (...{platega_mid[-4:]})" if platega_mid else "❌ Не задан"
+    platega_sec_status = f"✅ Задан (...{platega_sec[-4:]})" if platega_sec else "❌ Не задан"
+    platega_method = db.get_setting("platega_payment_method") or "2"
     site_url = db.get_setting("site_url") or "не задан"
-    
+    mail_status = mailer.describe()
+    resend_key = db.get_setting("mail_resend_key")
+    resend_status = f"✅ Задан (...{resend_key[-4:]})" if resend_key else "❌ Не задан"
+
     text = "⚙️ ГЛОБАЛЬНЫЕ ТАРИФЫ:\n\n"
     text += f"🎁 Пробный период: {trial} час(ов)\n"
     text += f"💵 Цена за 1 день: {p1} руб.\n"
     text += f"💵 Цена за 7 дней: {p7} руб.\n"
     text += f"💵 Цена за 30 дней: {p30} руб.\n\n"
+    text += f"💳 Автооплата: <b>{prov_status}</b>\n"
     text += f"🔑 AiPay API-ключ: {aipay_status}\n"
-    text += f"🌐 Адрес сайта: {site_url}\n"
+    text += f"🆔 Platega Merchant ID: {platega_mid_status}\n"
+    text += f"🔑 Platega Secret: {platega_sec_status}\n"
+    text += f"🧾 Platega ID метода оплаты: {platega_method}\n"
+    text += f"🌐 Адрес сайта: {site_url}\n\n"
+    text += f"📧 Отправка писем (регистрация по почте): <b>{mail_status}</b>\n"
+    text += f"🔑 Resend API-ключ: {resend_status}\n"
+    text += f"   (SMTP-параметры задаются кнопками ниже)\n"
     
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="🖥 Цены серверов", callback_data="adm_srv_prices_menu"))
     builder.add(InlineKeyboardButton(text="💳 Реквизиты оплаты", callback_data="set_manual_payment_details"))
+    builder.add(InlineKeyboardButton(text="🔁 Автооплата: вкл/выкл/провайдер", callback_data="pay_provider_switch"))
     builder.add(InlineKeyboardButton(text="🔑 API-ключ AiPay", callback_data="set_aipay_api_key"))
+    builder.add(InlineKeyboardButton(text="🆔 Platega Merchant ID", callback_data="set_platega_merchant"))
+    builder.add(InlineKeyboardButton(text="🔑 Platega Secret", callback_data="set_platega_secret"))
+    builder.add(InlineKeyboardButton(text="🧾 Platega ID метода", callback_data="set_platega_payment_method"))
     builder.add(InlineKeyboardButton(text="🌐 Адрес сайта", callback_data="set_site_url"))
+    builder.add(InlineKeyboardButton(text="📧 Тип отправки почты", callback_data="mail_mode_switch"))
+    builder.add(InlineKeyboardButton(text="📮 SMTP хост", callback_data="set_mail_smtp_host"))
+    builder.add(InlineKeyboardButton(text="🔢 SMTP порт", callback_data="set_mail_smtp_port"))
+    builder.add(InlineKeyboardButton(text="👤 SMTP логин", callback_data="set_mail_smtp_user"))
+    builder.add(InlineKeyboardButton(text="🔑 SMTP пароль", callback_data="set_mail_smtp_password"))
+    builder.add(InlineKeyboardButton(text="🔒 SMTP TLS", callback_data="set_mail_smtp_tls"))
+    builder.add(InlineKeyboardButton(text="✉️ Отправитель (From)", callback_data="set_mail_from"))
+    builder.add(InlineKeyboardButton(text="🔑 Resend API-ключ", callback_data="set_mail_resend_key"))
     builder.add(InlineKeyboardButton(text="📝 Тест (часы)", callback_data="set_trial_hours"))
     builder.add(InlineKeyboardButton(text="📝 1 день", callback_data="set_price_1d"))
     builder.add(InlineKeyboardButton(text="📝 7 дней", callback_data="set_price_7d"))
     builder.add(InlineKeyboardButton(text="📝 30 дней", callback_data="set_price_30d"))
     builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data="adm_menu"))
-    builder.adjust(1, 1, 1, 1, 1, 2, 1, 1)
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    builder.adjust(1)
+    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @admin_router.callback_query(F.data == "set_aipay_api_key")
 async def set_aipay_key_start(callback: CallbackQuery, state: FSMContext):
@@ -428,6 +462,107 @@ async def set_aipay_key_start(callback: CallbackQuery, state: FSMContext):
 async def set_aipay_key_proc(message: Message, state: FSMContext):
     db.update_setting("aipay_api_key", message.text.strip())
     await message.answer("✅ API-ключ AiPay успешно сохранен!", reply_markup=get_admin_keyboard())
+    await state.clear()
+
+# --- ПЕРЕКЛЮЧЕНИЕ ПЛАТЕЖНОГО ПРОВАЙДЕРА (off -> platega -> aipay -> off) ---
+@admin_router.callback_query(F.data == "pay_provider_switch")
+async def pay_provider_switch(callback: CallbackQuery):
+    cur = (db.get_setting("payment_provider") or "off").strip().lower()
+    nxt = {"off": "platega", "platega": "aipay", "aipay": "off"}.get(cur, "off")
+    db.update_setting("payment_provider", nxt)
+    names = {"off": "❌ Выключена", "aipay": "AiPay", "platega": "Platega"}
+    await callback.answer(f"Автооплата: {names[nxt]}")
+    await view_settings(callback)
+
+# --- НАСТРОЙКИ ОТПРАВКИ ПИСЕМ (регистрация по почте) ---
+@admin_router.callback_query(F.data == "mail_mode_switch")
+async def mail_mode_switch(callback: CallbackQuery):
+    cur = (db.get_setting("mail_mode") or "auto").strip().lower()
+    nxt = {"auto": "smtp", "smtp": "resend", "resend": "off", "off": "auto"}.get(cur, "auto")
+    db.update_setting("mail_mode", nxt)
+    await callback.answer(f"mail_mode = {nxt} (сейчас: {mailer.describe()})")
+    await view_settings(callback)
+
+_MAIL_PROMPTS = {
+    "mail_smtp_host": "Введите SMTP-сервер, например: smtp.yandex.ru",
+    "mail_smtp_port": "Введите порт: 587 (starttls) или 465 (ssl)",
+    "mail_smtp_user": "Введите логин SMTP (обычно сам адрес почты)",
+    "mail_smtp_password": "Введите пароль SMTP (для Gmail - пароль приложения)",
+    "mail_smtp_tls": "Введите тип шифрования: starttls, ssl или none",
+    "mail_from": "Введите адрес отправителя, например:\nAmneziaWG VPN <no-reply@amneziawg.fun>",
+    "mail_resend_key": "Введите API-ключ Resend (начинается с re_...), из личного кабинета resend.com",
+}
+
+@admin_router.callback_query(F.data.startswith("set_mail_"))
+async def set_mail_start(callback: CallbackQuery, state: FSMContext):
+    key = callback.data.replace("set_", "")
+    if key not in _MAIL_PROMPTS:
+        return await callback.answer("Неизвестный параметр", show_alert=True)
+    current = db.get_setting(key)
+    masked = f"...{current[-4:]}" if current and key in ("mail_smtp_password", "mail_resend_key") else (current or "не задан")
+    await state.update_data(current_key=key)
+    await callback.message.answer(
+        f"Текущее значение `{key}`: <code>{html.quote(masked)}</code>\n\n"
+        + _MAIL_PROMPTS[key] + "\n\nОтправьте «-» (минус), чтобы очистить значение.",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_mail_value)
+    await callback.answer()
+
+@admin_router.message(AdminStates.waiting_for_mail_value)
+async def set_mail_proc(message: Message, state: FSMContext):
+    val = message.text.strip()
+    if val == "-":
+        val = ""
+    data = await state.get_data()
+    key = data.get("current_key") or ""
+    if key not in _MAIL_PROMPTS:
+        await state.clear()
+        return await message.answer("⚠️ Параметр потерян, начните заново из /admin")
+    db.update_setting(key, val)
+    await message.answer(
+        f"✅ Настройка <code>{key}</code> сохранена!\nТекущий режим отправки: {mailer.describe()}",
+        reply_markup=get_admin_keyboard(),
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+@admin_router.callback_query(F.data == "set_platega_merchant")
+async def set_platega_merchant_start(callback: CallbackQuery, state: FSMContext):
+    current = db.get_setting("platega_merchant_id")
+    masked = f"...{current[-4:]}" if current else "не задан"
+    await callback.message.answer(
+        f"Текущий Platega Merchant ID: <code>{masked}</code>\n\n"
+        f"Введите Merchant ID (UUID). Его выдает менеджер Platega, "
+        f"он также есть в личном кабинете my.platega.io на странице «Настройки»:",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_platega_merchant)
+    await callback.answer()
+
+@admin_router.message(AdminStates.waiting_for_platega_merchant)
+async def set_platega_merchant_proc(message: Message, state: FSMContext):
+    db.update_setting("platega_merchant_id", message.text.strip())
+    await message.answer("✅ Platega Merchant ID сохранен!", reply_markup=get_admin_keyboard())
+    await state.clear()
+
+@admin_router.callback_query(F.data == "set_platega_secret")
+async def set_platega_secret_start(callback: CallbackQuery, state: FSMContext):
+    current = db.get_setting("platega_secret")
+    masked = f"...{current[-4:]}" if current else "не задан"
+    await callback.message.answer(
+        f"Текущий Platega Secret: <code>{masked}</code>\n\n"
+        f"Введите Secret (API-ключ). Его выдает менеджер Platega, "
+        f"он также есть в личном кабинете my.platega.io на странице «Настройки»:",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminStates.waiting_for_platega_secret)
+    await callback.answer()
+
+@admin_router.message(AdminStates.waiting_for_platega_secret)
+async def set_platega_secret_proc(message: Message, state: FSMContext):
+    db.update_setting("platega_secret", message.text.strip())
+    await message.answer("✅ Platega Secret сохранен!", reply_markup=get_admin_keyboard())
     await state.clear()
 
 @admin_router.callback_query(F.data == "set_site_url")
@@ -463,8 +598,11 @@ async def set_man_det_proc(message: Message, state: FSMContext):
 @admin_router.callback_query(
     F.data.startswith("set_")
     & ~F.data.startswith("set_srv_")
+    & ~F.data.startswith("set_mail_")
     & (F.data != "set_manual_payment_details")
     & (F.data != "set_aipay_api_key")
+    & (F.data != "set_platega_merchant")
+    & (F.data != "set_platega_secret")
     & (F.data != "set_site_url")
 )
 async def change_setting_start(callback: CallbackQuery, state: FSMContext):

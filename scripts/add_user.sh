@@ -41,22 +41,24 @@ fi
 
 CLIENT_IP="${SUBNET}.${LAST_OCTET}"
 
-# 4. Получаем параметры обфускации AmneziaWG из конфига сервера
-get_val() {
-    docker exec -i $CONTAINER grep -i "^$1" "$CONF_PATH" 2>/dev/null | cut -d '=' -f2- | sed 's/^[ \t]*//;s/[ \t]*$//;s/\r//'
-}
+# 4. Копируем ВСЕ параметры обфускации из секции [Interface] конфига сервера.
+#    AmneziaWG 1.5/2.0/3.x добавил параметры (I1-I5, S3/S4, HeaderProtectionKey,
+#    ContentPaddingAddition, таймеры, RandomTrailers и т.д.), и клиент ОБЯЗАН получить
+#    их все — иначе handshake не проходит (именно так ломалось при переходе на AWG 3.0).
+#    Поэтому больше не держим жесткий список: копируем все строки "ключ = значение"
+#    из [Interface], кроме служебных полей самого интерфейса.
+IFACE_BLOCK=$(docker exec -i $CONTAINER sh -c "awk '/^\[Interface\]/{f=1;next} /^\[/{if(f)exit} f' $CONF_PATH" 2>/dev/null | tr -d '\r')
+OBF_PARAMS=$(printf '%s\n' "$IFACE_BLOCK" | awk -F= '
+    {
+        key=$1; gsub(/^[ \t]+|[ \t]+$/, "", key); key=tolower(key)
+        if (key != "" && key !~ /^(privatekey|address|listenport|dns|mtu|table|fwmark|preup|postup|predown|postdown|saveconfig)$/) {
+            line=$0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line); print line
+        }
+    }')
 
-Jc=$(get_val "Jc")
-Jmin=$(get_val "Jmin")
-Jmax=$(get_val "Jmax")
-S1=$(get_val "S1")
-S2=$(get_val "S2")
-S3=$(get_val "S3")
-S4=$(get_val "S4")
-H1=$(get_val "H1")
-H2=$(get_val "H2")
-H3=$(get_val "H3")
-H4=$(get_val "H4")
+if [ -z "$OBF_PARAMS" ]; then
+    echo "⚠️ Внимание: в [Interface] сервера не найдено параметров обфускации (простой WireGuard?)." >&2
+fi
 
 # 5. Добавляем пира в память интерфейса «на лету»
 docker exec -i $CONTAINER sh -c "echo '$PSK' > /tmp/psk.tmp && awg set awg0 peer '$PUB_KEY' preshared-key /tmp/psk.tmp allowed-ips '$CLIENT_IP/32' && rm /tmp/psk.tmp"
@@ -77,17 +79,7 @@ cat <<EOF
 Address = $CLIENT_IP/32
 DNS = 1.1.1.1, 1.0.0.1
 PrivateKey = $PRIV_KEY
-Jc = ${Jc:-0}
-Jmin = ${Jmin:-0}
-Jmax = ${Jmax:-0}
-S1 = ${S1:-0}
-S2 = ${S2:-0}
-S3 = ${S3:-0}
-S4 = ${S4:-0}
-H1 = ${H1:-0}
-H2 = ${H2:-0}
-H3 = ${H3:-0}
-H4 = ${H4:-0}
+$OBF_PARAMS
 
 [Peer]
 PublicKey = $SERVER_PUBKEY

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админка — AmneziaWG VPN</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f7f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .topbar { background: linear-gradient(135deg, #6f42c1, #0d6efd); color: #fff; padding: 18px 0; border-radius: 0 0 24px 24px; margin-bottom: 24px; }
+        .card-custom { border: none; border-radius: 18px; box-shadow: 0 5px 20px rgba(0,0,0,0.06); }
+        .nav-pills .nav-link { color: #8b949e; }
+        .nav-pills .nav-link.active { background-color: #6f42c1; }
+        .table-sm td, .table-sm th { vertical-align: middle; }
+    </style>
+    <link rel="stylesheet" href="/static/dark-theme.css">
+</head>
+<body>
+
+<div class="topbar">
+    <div class="container d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h4 class="fw-bold mb-0">🛠 Админ-панель</h4>
+            <small>AmneziaWG VPN</small>
+        </div>
+        <a href="/dashboard" class="btn btn-light btn-sm rounded-pill px-3">← В кабинет</a>
+    </div>
+</div>
+
+<div class="container pb-5">
+
+    <ul class="nav nav-pills nav-fill mb-4 bg-white rounded-pill p-1 shadow-sm">
+        <li class="nav-item"><a class="nav-link rounded-pill {{ 'active' if page == 'index' }}" href="/admin/web">📊 Сводка</a></li>
+        <li class="nav-item"><a class="nav-link rounded-pill {{ 'active' if page == 'users' }}" href="/admin/web/users">👥 Клиенты</a></li>
+        <li class="nav-item"><a class="nav-link rounded-pill {{ 'active' if page == 'servers' }}" href="/admin/web/servers">🖥 Серверы</a></li>
+        <li class="nav-item"><a class="nav-link rounded-pill {{ 'active' if page == 'requests' }}" href="/admin/web/requests">📥 Заявки</a></li>
+        <li class="nav-item"><a class="nav-link rounded-pill {{ 'active' if page == 'settings' }}" href="/admin/web/settings">⚙️ Настройки</a></li>
+        <li class="nav-item"><a class="nav-link rounded-pill {{ 'active' if page == 'admins' }}" href="/admin/web/admins">🛡 Админы</a></li>
+        <li class="nav-item"><a class="nav-link rounded-pill {{ 'active' if page == 'broadcast' }}" href="/admin/web/broadcast">📢 Рассылка</a></li>
+    </ul>
+
+    {% if msg %}<div class="alert alert-success rounded-3">{{ msg }}</div>{% endif %}
+    {% if error %}<div class="alert alert-danger rounded-3">{{ error }}</div>{% endif %}
+
+    {% block content %}{% endblock %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

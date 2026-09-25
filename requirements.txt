@@ -38,3 +38,4 @@ typing_extensions==4.16.0
 tzlocal==5.4.4
 uvicorn==0.51.0
 yarl==1.24.2
+segno==1.6.1
