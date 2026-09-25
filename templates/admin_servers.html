@@ -1,8 +1,18 @@
 {% extends "admin_base.html" %}
 {% block content %}
 
+<div class="card card-custom p-4 mb-4 border-warning" style="border-left:4px solid #ffc107">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h5 class="fw-bold mb-1">🧙‍♂️ Новый VPN-сервер? Запустите мастер установки</h5>
+            <small class="text-muted">Нужен только IP и root-пароль VPS: ключи, установка AmneziaWG, скрипты и занесение в базу — автоматически.</small>
+        </div>
+        <a href="/admin/web/servers/wizard" class="btn btn-warning rounded-pill px-4 fw-bold">🚀 Мастер установки</a>
+    </div>
+</div>
+
 <div class="card card-custom p-4 mb-4">
-    <h5 class="fw-bold mb-3">➕ Добавить сервер</h5>
+    <h5 class="fw-bold mb-3">➕ Добавить сервер вручную (уже установлен)</h5>
     <form method="post" action="/admin/web/servers/add" class="row g-2 align-items-end">
         <div class="col-md-4">
             <label class="form-label small text-muted">IP-адрес</label>
@@ -31,12 +41,18 @@
             <div>
                 <b>#{{ s.id }} · <code>{{ s.ip }}</code>:{{ s.port }}</b>
                 <span class="badge {{ 'bg-success' if s.active else 'bg-secondary' }} ms-1">{{ 'активен' if s.active else 'выключен' }}</span>
-                <small class="text-muted ms-2">занято мест: {{ s.paid }}/{{ s.limit }}</small>
+                <small class="text-muted ms-2">занято мест: {{ s.paid }}/{{ s.limit }} · подписок: {{ s.subs_total }} (акт. {{ s.subs_active }})</small>
             </div>
             <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary btn-sm rounded-pill">💾 Сохранить</button>
-                <button type="submit" formaction="/admin/web/servers/delete" class="btn btn-outline-danger btn-sm rounded-pill"
-                        onclick="return confirm('Удалить сервер #{{ s.id }} из продажи? Подписки клиентов при этом НЕ удаляются.')">🗑</button>
+                {% if s.active %}
+                <button type="submit" formaction="/admin/web/servers/delete" name="mode" value="disable" class="btn btn-outline-warning btn-sm rounded-pill"
+                        title="Убрать из продажи (конфиги продолжат работать)"
+                        onclick="return confirm('Выключить сервер #{{ s.id }} — убрать из продажи? Выданные конфиги продолжат работать до истечения.')">⏸ Выкл</button>
+                {% endif %}
+                <button type="submit" formaction="/admin/web/servers/delete" name="mode" value="permanent" class="btn btn-outline-danger btn-sm rounded-pill"
+                        title="Удалить из базы насовсем"
+                        onclick="return confirm('УДАЛИТЬ сервер #{{ s.id }} насовсем из базы?\n\nНа нем подписок: {{ s.subs_total }} (активных: {{ s.subs_active }}).\nСама VPN-нода не трогается, выданные конфиги доживут свой срок.')">🗑 Удалить</button>
             </div>
         </div>
         <div class="row g-2 align-items-end">

@@ -78,6 +78,12 @@
                         <input type="number" class="form-control form-control-lg text-center rounded-pill" id="captcha-answer" placeholder="Введите ответ (только цифры)">
                     </div>
                     <div id="trial-error" class="alert alert-danger d-none rounded-3 py-2 text-center small"></div>
+                    <div class="form-check text-start small mt-2">
+                        <input class="form-check-input" type="checkbox" id="tosCheck">
+                        <label class="form-check-label text-muted" for="tosCheck">
+                            Я принимаю <a href="/terms" target="_blank">пользовательское соглашение и политику конфиденциальности</a>
+                        </label>
+                    </div>
                 </div>
                 <div class="modal-footer border-0 pt-0 justify-content-center">
                     <button type="button" class="btn btn-primary rounded-pill px-5 fw-bold btn-lg w-100" onclick="requestTrialConfig()">Скачать TWG.conf</button>
@@ -152,6 +158,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/cookie-consent.js"></script>
     <script>
         let myModal;
 
@@ -184,6 +191,12 @@
             const errorDiv = document.getElementById('trial-error');
             
             errorDiv.classList.add('d-none');
+
+            if (!document.getElementById('tosCheck').checked) {
+                errorDiv.innerText = "Сначала примите пользовательское соглашение (галочка ниже).";
+                errorDiv.classList.remove('d-none');
+                return;
+            }
 
             if (!answer) {
                 errorDiv.innerText = "Пожалуйста, введите ответ.";

@@ -210,6 +210,11 @@ def _check_captcha(captcha_id: str, captcha_answer: str) -> bool:
     except (ValueError, TypeError):
         return False
 
+@app.get("/terms")
+async def terms_page(request: Request):
+    """Публичная страница пользовательского соглашения / политики / cookies."""
+    return templates.TemplateResponse(request=request, name="terms.html", context={"request": request})
+
 @app.get("/login")
 async def login_page(request: Request):
     if _current_tg_id(request):

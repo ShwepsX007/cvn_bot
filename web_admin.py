@@ -96,7 +96,8 @@ async def admin_index(request: Request):
     servers = db.get_all_servers_full()
     unique_users = len(db.get_unique_user_ids() or [])
     active_subs = db.count_active_subs()
-    paid_count, revenue = db.get_paid_revenue()
+    paid_count, revenue = db.get_paid_revenue_display()
+    baseline_active = int(db.get_setting("stats_baseline_count") or 0) > 0 or int(db.get_setting("stats_baseline_sum") or 0) > 0
     pend_det = db.get_pending_detail_requests()
     pend_man = db.get_pending_manual_orders()
 
@@ -108,6 +109,7 @@ async def admin_index(request: Request):
         active_subs=active_subs,
         paid_count=paid_count,
         revenue=revenue,
+        baseline_active=baseline_active,
         pend_det=len(pend_det),
         pend_man=len(pend_man),
         mail_status=mailer.describe(),
@@ -200,10 +202,13 @@ async def admin_servers(request: Request):
     servers = []
     for s_id, ip, port, active, name, max_users, p1, p7, p30 in db.get_all_servers_full():
         paid = db.count_paid_users_on_server(s_id) or 0
+        subs_total = db.count_server_subs(s_id)
+        subs_active = db.count_server_subs(s_id, only_active=True)
         servers.append({
             "id": s_id, "ip": ip, "port": port, "active": bool(active),
             "name": name, "limit": max_users, "paid": paid,
             "price_1d": p1, "price_7d": p7, "price_30d": p30,
+            "subs_total": subs_total, "subs_active": subs_active,
         })
     return templates.TemplateResponse(request=request, name="admin_servers.html", context=_ctx(request, "servers", servers=servers))
 
@@ -249,14 +254,88 @@ async def admin_server_update(
 
 
 @router.post("/servers/delete")
-async def admin_server_delete(request: Request, server_id: int = Form(...)):
+async def admin_server_delete(request: Request, server_id: int = Form(...), mode: str = Form("permanent")):
+    """Удаление: permanent - насовсем из базы; disable - только убрать из продажи."""
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
     try:
-        db.delete_server(server_id)
-        return _back("/admin/web/servers", msg=f"Сервер #{server_id} удален.")
+        if mode == "disable":
+            db.set_server_active(server_id, False)
+            return _back("/admin/web/servers", msg=f"Сервер #{server_id} выключен (убран из продажи).")
+        subs_total = db.count_server_subs(server_id)
+        subs_active = db.count_server_subs(server_id, only_active=True)
+        db.delete_server_permanently(server_id)
+        note = f"Сервер #{server_id} удален из базы насовсем."
+        if subs_total:
+            note += f" Внимание: на нем было подписок: {subs_total} (активных: {subs_active}) - их записи остались, а выданные конфиги продолжат работать до истечения срока."
+        return _back("/admin/web/servers", msg=note)
     except Exception as e:
         return _back("/admin/web/servers", error=f"Ошибка удаления: {e}")
+
+
+# ==================== МАСТЕР УСТАНОВКИ НОВОГО СЕРВЕРА ====================
+@router.get("/servers/wizard")
+async def server_wizard_form(request: Request):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("admin_wizard.html", _ctx(request, "servers"))
+
+
+@router.post("/servers/wizard")
+async def server_wizard_run(request: Request,
+                            ip: str = Form(...),
+                            ssh_port: int = Form(2222),
+                            ssh_password: str = Form(...),
+                            name: str = Form(""),
+                            limit: int = Form(20)):
+    """Автоустановка ноды: обмен ключами, AmneziaWG (если нет), скрипты, занесение в базу."""
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+
+    ip = ip.strip()
+    name = name.strip() or "VPN Server"
+    if not ip:
+        return _back("/admin/web/servers/wizard", error="Укажите IP нового сервера.")
+
+    import server_installer
+    # установка идет 1-5 минут (pull образа) - выносим в поток, чтобы не блокировать сайт
+    result = await asyncio.to_thread(server_installer.install_new_server, ip, int(ssh_port), ssh_password, name)
+
+    if not result["ok"]:
+        return templates.TemplateResponse("admin_wizard_result.html", _ctx(
+            request, "servers",
+            ok=False, ip=ip, name=name, udp_port=result["udp_port"],
+            log="\n".join(result["steps"]), error=result["error"]
+        ))
+
+    try:
+        db.add_server(ip, name, int(ssh_port))
+        db.set_server_limit(next((s[0] for s in db.get_all_servers_full() if s[1] == ip), 0) or 0, int(limit))
+    except Exception as e:
+        return templates.TemplateResponse("admin_wizard_result.html", _ctx(
+            request, "servers",
+            ok=False, ip=ip, name=name, udp_port=result["udp_port"],
+            log="\n".join(result["steps"]),
+            error=f"Нода установлена, но не добавлена в базу: {e}"
+        ))
+
+    return templates.TemplateResponse("admin_wizard_result.html", _ctx(
+        request, "servers",
+        ok=True, ip=ip, name=name, udp_port=result["udp_port"],
+        log="\n".join(result["steps"]), error=None
+    ))
+
+
+# ==================== СЧЕТЧИК ОПЛАТ (сброс) ====================
+@router.post("/stats/reset")
+async def stats_reset(request: Request, mode: str = Form("reset")):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    if mode == "clear":
+        db.clear_revenue_baseline()
+        return _back("/admin/web", msg="Счетчик оплат снова показывает сумму за все время.")
+    cnt, total = db.reset_revenue_baseline()
+    return _back("/admin/web", msg=f"Счетчик оплат сброшен. Зафиксирована точка отсчета: {cnt} оплат на {total} руб. (история заказов сохранена).")
 
 
 # ==================== ЗАЯВКИ ====================

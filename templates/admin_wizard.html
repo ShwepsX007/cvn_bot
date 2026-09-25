@@ -1,0 +1,83 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="row">
+<div class="col-lg-7">
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-1">🧙‍♂️ Мастер установки нового сервера</h5>
+    <small class="text-muted d-block mb-3">
+        Всё, что раньше делалось руками в терминале (ssh-copy-id, установка AmneziaWG, заливка скриптов),
+        выполнится автоматически. Нужен только IP и root-пароль от нового VPS. Пароль нигде не сохраняется.
+    </small>
+    <form method="post" action="/admin/web/servers/wizard" id="wizardForm">
+        <div class="row g-2">
+            <div class="col-md-7">
+                <label class="form-label small text-muted">IP-адрес нового сервера</label>
+                <input type="text" name="ip" class="form-control" placeholder="203.0.113.10" required>
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small text-muted">SSH-порт</label>
+                <input type="number" name="ssh_port" class="form-control" value="2222" required>
+            </div>
+            <div class="col-12">
+                <label class="form-label small text-muted">Пароль root нового сервера</label>
+                <input type="password" name="ssh_password" class="form-control" placeholder="из панели хостера / письма" required autocomplete="off">
+                <small class="text-muted">Используется один раз — для передачи SSH-ключа. Дальше бот ходит по ключу.</small>
+            </div>
+            <div class="col-md-7">
+                <label class="form-label small text-muted">Название (локация), как в продаже</label>
+                <input type="text" name="name" class="form-control" placeholder="🇳🇱 Нидерланды">
+            </div>
+            <div class="col-md-5">
+                <label class="form-label small text-muted">Лимит мест</label>
+                <input type="number" name="limit" class="form-control" value="20" required>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-warning rounded-pill px-4 mt-3" id="wizardBtn">🚀 Установить сервер</button>
+    </form>
+    <div id="wizardWait" class="alert alert-info rounded-3 small mt-3 mb-0" style="display:none">
+        ⏳ <b>Идёт установка — 1–5 минут.</b> Не закрывайте страницу: скачивается docker-образ.
+        По окончании здесь появится подробный лог по шагам.
+    </div>
+</div>
+
+</div>
+<div class="col-lg-5">
+
+<div class="card card-custom p-4 mb-4">
+    <h6 class="fw-bold mb-3">📋 Как запускать новый сервер (инструкция)</h6>
+    <ol class="small mb-0">
+        <li><b>Купите VPS</b> Ubuntu 22.04/24.04 (минимум 1 CPU / 512MB). Сохраните <b>IP</b> и <b>root-пароль</b> (приходят в панели хостера или на почту).</li>
+        <li class="mt-2">Если у вас НЕ стандартный SSH-порт 22 — бот ходит на порт <b>2222</b>. В мастере укажите тот, что сейчас (обычно <b>22</b> для нового VPS).</li>
+        <li class="mt-2"><b>Запустите мастер</b> слева. Он сам: передаст SSH-ключ, поставит AmneziaWG (docker + контейнер amnezia-awg2) со случайным защитным UDP-портом, настроит NAT, зальёт скрипты выдачи/удаления конфигов и занесёт сервер в базу.</li>
+        <li class="mt-2">В конце мастер покажет <b>внешний UDP-порт AmneziaWG</b>. Если у хостера есть внешний firewall (Cloud-сети/Security Groups) — откройте этот UDP-порт в его панели.</li>
+        <li class="mt-2"><b>Проверка:</b> «Клиенты» → выдайте себе тестовый доступ на новый сервер → импортируйте конфиг в AmneziaWG на телефоне и включите.</li>
+        <li class="mt-2">Цены на сервер задаются отдельно: страница «Серверы» (если пусто — действуют глобальные из «Настроек»).</li>
+    </ol>
+</div>
+
+<div class="card card-custom p-4">
+    <h6 class="fw-bold mb-2">🛠 Что делает автоустановщик (шаблон)</h6>
+    <ul class="small text-muted mb-0">
+        <li>docker + образ <code>amneziavpn/amneziawg-go</code></li>
+        <li>конфиг <code>awg0.conf</code> с параметрами обфускации (Jc/Jmin/Jmax, H1-H4…)</li>
+        <li><code>ip_forward</code>, NAT <code>MASQUERADE</code>, сохранение правил iptables</li>
+        <li>случайный внешний UDP-порт (10000–59999)</li>
+        <li>SSH-ключ бота в <code>authorized_keys</code></li>
+        <li><code>add_user.sh</code>/<code>remove_user.sh</code> в /root/ (+chmod, чистка переносов)</li>
+    </ul>
+</div>
+
+</div>
+</div>
+
+<script>
+document.getElementById('wizardForm').addEventListener('submit', function() {
+    document.getElementById('wizardBtn').disabled = true;
+    document.getElementById('wizardBtn').textContent = '⏳ Устанавливаю...';
+    document.getElementById('wizardWait').style.display = 'block';
+});
+</script>
+
+{% endblock %}

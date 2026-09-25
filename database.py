@@ -65,7 +65,10 @@ def init_db():
         ('mail_smtp_password', ''),
         ('mail_smtp_tls', 'starttls'),
         ('mail_from', ''),
-        ('mail_resend_key', '')
+        ('mail_resend_key', ''),
+        # Точка отсчета счетчика оплат в веб-админке («Сбросить счетчик»)
+        ('stats_baseline_count', '0'),
+        ('stats_baseline_sum', '0')
     ]
     cursor.executemany("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", default_settings)
     
@@ -603,6 +606,27 @@ def count_active_subs():
     conn.close()
     return int(n or 0)
 
+def get_paid_revenue_display():
+    """(кол-во, сумма) оплаченных заказов с учетом baseline-смещения
+    (кнопка «Сбросить счетчик оплат» в веб-админке просто фиксирует текущие
+    значения как baseline - история самих заказов не удаляется)."""
+    cnt, total = get_paid_revenue()
+    base_cnt = int(get_setting("stats_baseline_count") or 0)
+    base_sum = int(get_setting("stats_baseline_sum") or 0)
+    return max(0, cnt - base_cnt), max(0, total - base_sum)
+
+def reset_revenue_baseline():
+    """Зафиксировать текущее значение счетчика как нулевую точку отсчета."""
+    cnt, total = get_paid_revenue()
+    update_setting("stats_baseline_count", str(cnt))
+    update_setting("stats_baseline_sum", str(total))
+    return cnt, total
+
+def clear_revenue_baseline():
+    """Вернуть показ полного счетчика за все время."""
+    update_setting("stats_baseline_count", "0")
+    update_setting("stats_baseline_sum", "0")
+
 def get_all_servers_full():
     """Все серверы (и неактивные): (id, ip, port, active, name, max_users, price_1d, price_7d, price_30d)."""
     conn = get_conn()
@@ -618,6 +642,27 @@ def set_server_active(server_id, active):
     cursor.execute("UPDATE servers SET active=? WHERE id=?", (1 if active else 0, server_id))
     conn.commit()
     conn.close()
+
+def delete_server_permanently(server_id):
+    """Полное удаление сервера из базы (в отличие от delete_server, который только выключает).
+    Сама VPN-нода при этом не трогается: выданные конфиги продолжат работать до истечения."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM servers WHERE id=?", (server_id,))
+    conn.commit()
+    conn.close()
+
+def count_server_subs(server_id, only_active=False):
+    """Сколько подписок (исторически / активных) завязано на сервер - для предупреждения при удалении."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    if only_active:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE server_id=? AND active=1", (server_id,))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM users WHERE server_id=?", (server_id,))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return int(n or 0)
 
 
 def get_expired_users():
