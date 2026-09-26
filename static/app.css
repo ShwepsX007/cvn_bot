@@ -454,3 +454,43 @@ pre {
   }
   .auth-footer a { font-size: .78rem; }
 }
+
+/* Site-wide finishing layer: keep every route on the homepage design system. */
+html, body {
+  background: var(--oc-bg) !important;
+  color: var(--oc-text) !important;
+}
+body {
+  font-family: var(--bs-body-font-family) !important;
+  font-size: var(--bs-body-font-size);
+  line-height: var(--bs-body-line-height);
+}
+
+.topbar {
+  background: var(--oc-bg-2) !important;
+  color: var(--oc-text) !important;
+  border-bottom: 1px solid var(--oc-border) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 14px 0 !important;
+  margin-bottom: 24px !important;
+}
+.topbar .container > .d-flex { flex-wrap: wrap; }
+
+.btn, .btn.rounded-pill {
+  max-width: 100%;
+  font-family: var(--bs-body-font-family) !important;
+  font-weight: 500;
+  border-radius: 9px !important;
+}
+.btn-sm { font-size: .82rem; }
+.btn-lg { font-size: .98rem; }
+.nav-pills .nav-link.rounded-pill { border-radius: 9px !important; }
+
+@media (max-width: 575.98px) {
+  .topbar .container { align-items: flex-start !important; }
+  .topbar .container > .d-flex,
+  .topbar .container > nav { width: 100%; gap: .5rem !important; }
+  .topbar .btn { white-space: normal; line-height: 1.25; }
+  .hero-section { padding: 42px 0 !important; }
+}
