@@ -100,8 +100,10 @@
                 </div>
                 {% if sub.has_config %}
                 <div id="qr-block-{{ sub.server_id }}" class="mt-3" style="display:none">
-                    <img src="/qr/{{ sub.server_id }}" class="qr-img" alt="QR-код конфига" style="max-width:230px">
-                    <div class="small text-muted mt-1">Откройте AmneziaWG на телефоне → «Добавить туннель» → «Сканировать QR-код» и наведите камеру на этот код.</div>
+                    <a href="/qr/{{ sub.server_id }}" target="_blank" rel="noopener" aria-label="Открыть QR-код в полном размере">
+                        <img src="/qr/{{ sub.server_id }}" class="qr-img" alt="QR-код конфигурации" style="display:block;width:100%;max-width:460px;height:auto;image-rendering:pixelated">
+                    </a>
+                    <div class="small text-muted mt-1">Откройте сканер AmneziaWG на телефоне и наведите камеру на QR. Если экран уменьшил изображение, нажмите на него, чтобы открыть полный размер.</div>
                 </div>
                 <pre id="cfg-text-{{ sub.server_id }}" class="cfg-pre small mt-3 p-2" style="display:none; white-space:pre-wrap"></pre>
                 {% endif %}

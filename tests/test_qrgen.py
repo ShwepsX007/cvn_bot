@@ -28,6 +28,7 @@ def test_make_qr_png_encodes_normalized_text(monkeypatch):
 
     class FakeQr:
         def save(self, output, **kwargs):
+            captured["save_options"] = kwargs
             output.write(b"png")
 
     class FakeSegno:
@@ -44,4 +45,6 @@ def test_make_qr_png_encodes_normalized_text(monkeypatch):
 
     assert png == b"png"
     assert captured["text"] == "[Interface]\nPrivateKey = secret\n[Peer]\n"
-    assert captured["error"] == "h"
+    assert captured["error"] == "l"
+    assert captured["save_options"]["scale"] == 8
+    assert captured["save_options"]["border"] == 4
