@@ -22,18 +22,24 @@ def available() -> bool:
     return _SEGNO_OK
 
 
-def make_qr_png(text: str, scale: int = 6):
+def make_qr_png(text: str, scale: int = 5):
     """
     Делает QR-код (PNG-байты) из текста конфигурации.
-    error="m" - средний уровень коррекции ошибок: QR получается не слишком плотным
-    и уверенно сканируется камерой даже с экрана ноутбука.
+    error="h" - максимальный уровень коррекции ошибок (~30%): AmneziaWG-конфиги
+    длинные (обфускационные параметры), QR получается плотным, и с таким
+    уровнем он увереннее сканируется камерой с экрана, даже если картинка
+    чуть уменьшена вёрсткой или бликует. Scale 5 — баланс размера/читаемости.
     """
     if not _SEGNO_OK or not text:
         return None
     try:
-        qr = segno.make(text, error="m")
+        # ЗАЩИТА: на всякий случай сбрасываем возвраты каретки и BOM из текста
+        # конфига — иначе AmneziaWG откажется парсить ключ/PSK, а QR будет
+        # нечитаемым из-за неожиданных байтов посреди строк.
+        clean = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+        qr = segno.make(clean, error="h")
         buf = io.BytesIO()
-        qr.save(buf, kind="png", scale=scale, dark="#111111", light="#ffffff")
+        qr.save(buf, kind="png", scale=scale, dark="#111111", light="#ffffff", border=2)
         return buf.getvalue()
     except Exception:
         return None

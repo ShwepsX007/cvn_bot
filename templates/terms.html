@@ -2,19 +2,34 @@
 <html lang="ru" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Пользовательское соглашение — AmneziaWG VPN</title>
+    <title>{{ page_title }}</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f4f7f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         .topbar { background: linear-gradient(135deg, #0d6efd, #0dcaf0); color: #fff; padding: 22px 0; border-radius: 0 0 28px 28px; margin-bottom: 30px; }
         .card-custom { border: none; border-radius: 18px; box-shadow: 0 5px 20px rgba(0,0,0,0.05); }
     </style>
-    <link rel="stylesheet" href="/static/dark-theme.css">
+    <link rel="stylesheet" href="/static/app.css">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#171c2b">
+<meta name="description" content="{{ og_description }}">
+<meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">
+<link rel="canonical" href="{{ canonical_url }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ og_title }}">
+<meta property="og:description" content="{{ og_description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:image" content="{{ og_image }}">
+<meta property="og:site_name" content="AmneziaWG VPN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ og_title }}">
+<meta name="twitter:description" content="{{ og_description }}">
+<meta name="twitter:image" content="{{ og_image }}">
 </head>
 <body>
 
@@ -74,5 +89,8 @@
 </div>
 
 <script src="/static/cookie-consent.js"></script>
+
+{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
+{% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

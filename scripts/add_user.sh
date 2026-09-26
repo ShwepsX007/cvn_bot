@@ -31,7 +31,7 @@ SERVER_IP=$(curl -s4 icanhazip.com 2>/dev/null | tr -d '\r')
 
 # 3. Высчитываем свободный IP для клиента в подсети awg0
 SUBNET=$(docker exec -i $CONTAINER ip -4 addr show awg0 2>/dev/null | grep -oP '(?<=inet )\d+\.\d+\.\d+' | head -n 1 | tr -d '\r')
-LAST_OCTET=$(docker exec -i $CONTAINER awg show awg0 allowed-ips 2>/dev/null | awk '{print $2}' | grep -oP '\d+(?=/32)' | sort -n | tail -n 1)
+LAST_OCTET=$(docker exec -i $CONTAINER awg show awg0 allowed-ips 2>/dev/null | awk '{print $2}' | grep -oP '\d+(?=/32)' | sort -n | tail -n 1 | tr -d '\r')
 
 if [ -z "$LAST_OCTET" ]; then
     LAST_OCTET=2
@@ -48,7 +48,11 @@ CLIENT_IP="${SUBNET}.${LAST_OCTET}"
 #    Поэтому больше не держим жесткий список: копируем все строки "ключ = значение"
 #    из [Interface], кроме служебных полей самого интерфейса.
 IFACE_BLOCK=$(docker exec -i $CONTAINER sh -c "awk '/^\[Interface\]/{f=1;next} /^\[/{if(f)exit} f' $CONF_PATH" 2>/dev/null | tr -d '\r')
-OBF_PARAMS=$(printf '%s\n' "$IFACE_BLOCK" | awk -F= '
+# ВАЖНО: убираем ВСЕ возвраты каретки (\r) у обфускационных параметров.
+# Если хотя бы один \r попадет в клиентский [Interface], AmneziaWG молча не
+# подхватит параметр, хендшейк не пройдёт, а QR-код с \r внутри строк плохо
+# сканируется камерой телефона (и импорт по QR тоже сломан).
+OBF_PARAMS=$(printf '%s\n' "$IFACE_BLOCK" | tr -d '\r' | awk -F= '
     {
         key=$1; gsub(/^[ \t]+|[ \t]+$/, "", key); key=tolower(key)
         if (key != "" && key !~ /^(privatekey|address|listenport|dns|mtu|table|fwmark|preup|postup|predown|postdown|saveconfig)$/) {

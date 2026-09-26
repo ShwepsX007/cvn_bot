@@ -1,4 +1,5 @@
 import hashlib
+import shlex
 from typing import Callable, Dict, Any, Awaitable
 from datetime import datetime
 
@@ -21,7 +22,7 @@ import mailer
 from config import ADMIN_ID
 
 user_router = Router()
-ADMIN_ID = 1617274846
+# ADMIN_ID берётся строго из config.py, чтобы не рассинхронизировать.
 
 # Партнерская ссылка на Amnezia Premium (официальный тариф от разработчиков AmneziaWG)
 AMNEZIA_PREMIUM_URL = "https://amnezia.org/premium?arf=6VBU1RPKQZ2GYY9J"
@@ -137,12 +138,12 @@ async def check_and_clean_expired(tg_id: int):
                     server = db.get_server_by_id(s_id)
                     if server:
                         ip, port = server[0], server[1]
-                        cmd = f"bash /root/remove_user.sh {uname}"
+                        cmd = f"bash /root/remove_user.sh {shlex.quote(uname)}"
                         await ssh.run_ssh_command(ip, port, cmd)
                     db.deactivate_user(t_id, s_id)
                     has_expired = True
-            except Exception:
-                pass
+            except Exception as _e:
+                    print(f"⚠️ Не удалось разобрать дату expire_date: {_e}")
     return "expired" if has_expired else "ok"
 
 
@@ -774,7 +775,7 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
 
     ip, port, srv_name = server[0], server[1], server[2]
 
-    cmd = f"bash /root/add_user.sh {username}"
+    cmd = f"bash /root/add_user.sh {shlex.quote(username)}"
     config_text = await ssh.run_ssh_command(ip, port, cmd)
     if not config_text or "Ошибка" in config_text:
         return False, config_text or "Пустой ответ (Таймаут или ошибка подключения)"
@@ -790,8 +791,8 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
     )
     try:
         await bot.send_document(tg_id, config_file, caption=caption, parse_mode="HTML")
-    except Exception:
-        pass
+    except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
 
     # QR-код того же конфига - удобно импортировать на телефон, не пересылая файл
     qr_png = qrgen.make_qr_png(config_text)
@@ -802,8 +803,8 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
                 BufferedInputFile(qr_png, filename="vpn_qr.png"),
                 caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
             )
-        except Exception:
-            pass
+        except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
 
     return True, config_text
 
@@ -825,7 +826,8 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
                 expire_date = parse_date(exp_date_str)
                 if expire_date > datetime.now():
                     is_active = True
-            except Exception: pass
+            except Exception as _e:
+                print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
 
     if is_active:
         if period == "trial":
@@ -841,12 +843,13 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
                 f"✅ <b>Услуга продлена!</b>\n\nВаша подписка на сервер <b>{srv_name}</b> успешно продлена. Ваш текущий конфиг остается прежним и продолжает работать. Скачивать новый не нужно!", 
                 parse_mode="HTML"
             )
-        except Exception: pass
+        except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
 
         await _notify_admin_grant(bot, tg_id, srv_name, period, renewed=True, notify_admin=notify_admin)
         return True, "Продлено"
 
-    cmd = f"bash /root/add_user.sh {username}"
+    cmd = f"bash /root/add_user.sh {shlex.quote(username)}"
     config_text = await ssh.run_ssh_command(ip, port, cmd)
     
     if not config_text or "Ошибка" in config_text:
@@ -868,7 +871,8 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
     )
     try:
         await bot.send_document(tg_id, config_file, caption=caption, parse_mode="HTML")
-    except Exception: pass
+    except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
 
     # QR-код того же конфига - удобно импортировать на телефон, не пересылая файл
     qr_png = qrgen.make_qr_png(config_text)
@@ -879,7 +883,8 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
                 BufferedInputFile(qr_png, filename="vpn_qr.png"),
                 caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
             )
-        except Exception: pass
+        except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
 
     await _notify_admin_grant(bot, tg_id, srv_name, period, renewed=False, notify_admin=notify_admin)
     return True, config_text
@@ -914,5 +919,5 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
 
     try:
         await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
-    except Exception:
-        pass
+    except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
