@@ -22,6 +22,19 @@ def available() -> bool:
     return _SEGNO_OK
 
 
+def _normalize_config_for_qr(text: str) -> str:
+    """Normalize line endings and remove empty assignments unsupported by some clients."""
+    clean = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    lines = []
+    for line in clean.split("\n"):
+        if "=" in line:
+            key, value = line.split("=", 1)
+            if key.strip() and not value.strip():
+                continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def make_qr_png(text: str, scale: int = 5):
     """
     Делает QR-код (PNG-байты) из текста конфигурации.
@@ -31,10 +44,9 @@ def make_qr_png(text: str, scale: int = 5):
     if not _SEGNO_OK or not text:
         return None
     try:
-        # ЗАЩИТА: на всякий случай сбрасываем возвраты каретки и BOM из текста
-        # конфига — иначе AmneziaWG откажется парсить ключ/PSK, а QR будет
-        # нечитаемым из-за неожиданных байтов посреди строк.
-        clean = text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+        # Убираем CR/BOM и пустые key=value назначения вроде "I2 =".
+        # Некоторые версии AmneziaWG Android не импортируют такой конфиг по QR.
+        clean = _normalize_config_for_qr(text)
         qr = segno.make(clean, error="h")
         buf = io.BytesIO()
         qr.save(buf, kind="png", scale=scale, dark="#111111", light="#ffffff", border=2)

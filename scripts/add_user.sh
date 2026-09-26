@@ -45,8 +45,8 @@ CLIENT_IP="${SUBNET}.${LAST_OCTET}"
 #    AmneziaWG 1.5/2.0/3.x добавил параметры (I1-I5, S3/S4, HeaderProtectionKey,
 #    ContentPaddingAddition, таймеры, RandomTrailers и т.д.), и клиент ОБЯЗАН получить
 #    их все — иначе handshake не проходит (именно так ломалось при переходе на AWG 3.0).
-#    Поэтому больше не держим жесткий список: копируем все строки "ключ = значение"
-#    из [Interface], кроме служебных полей самого интерфейса.
+#    Копируем дополнительные параметры из [Interface], но отбрасываем пустые значения:
+#    строки вроде "I2 =" ломают импорт QR в некоторых версиях AmneziaWG Android.
 IFACE_BLOCK=$(docker exec -i $CONTAINER sh -c "awk '/^\[Interface\]/{f=1;next} /^\[/{if(f)exit} f' $CONF_PATH" 2>/dev/null | tr -d '\r')
 # ВАЖНО: убираем ВСЕ возвраты каретки (\r) у дополнительных параметров протокола.
 # Если хотя бы один \r попадет в клиентский [Interface], AmneziaWG молча не
@@ -55,8 +55,10 @@ IFACE_BLOCK=$(docker exec -i $CONTAINER sh -c "awk '/^\[Interface\]/{f=1;next} /
 OBF_PARAMS=$(printf '%s\n' "$IFACE_BLOCK" | tr -d '\r' | awk -F= '
     {
         key=$1; gsub(/^[ \t]+|[ \t]+$/, "", key); key=tolower(key)
-        if (key != "" && key !~ /^(privatekey|address|listenport|dns|mtu|table|fwmark|preup|postup|predown|postdown|saveconfig)$/) {
-            line=$0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line); print line
+        line=$0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line)
+        value=line; sub(/^[^=]*=/, "", value); gsub(/^[ \t]+|[ \t]+$/, "", value)
+        if (key != "" && key !~ /^(privatekey|address|listenport|dns|mtu|table|fwmark|preup|postup|predown|postdown|saveconfig)$/ && value != "") {
+            print line
         }
     }')
 
