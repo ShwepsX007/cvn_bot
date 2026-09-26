@@ -153,6 +153,18 @@ def test_free_page_renders(client):
     assert "Бесплатный VPN" in r.text
 
 
+def test_legal_documents_are_separate_and_public(client):
+    terms = client.get("/terms")
+    privacy = client.get("/privacy")
+    home = client.get("/")
+
+    assert terms.status_code == privacy.status_code == home.status_code == 200
+    assert '<h1 class="h3 fw-bold mb-4">Пользовательское соглашение</h1>' in terms.text
+    assert '<h1 class="h3 fw-bold mb-4">Политика конфиденциальности</h1>' in privacy.text
+    assert 'href="/terms"' in home.text
+    assert 'href="/privacy"' in home.text
+
+
 def test_config_page_grant_mode_with_server(client):
     add_free_server()
     r = client.get("/free/config")
@@ -198,6 +210,7 @@ def test_grant_flow_and_renew(client):
     r3 = client.get(f"/free/download/{tok}")
     assert r3.status_code == 200
     assert r3.content.decode() == FAKE_CFG
+    assert f"filename=free{acc_id}.conf" in r3.headers["content-disposition"]
 
     # QR работает
     r4 = client.get(f"/free/qr/{tok}")

@@ -19,7 +19,8 @@
             'flex-wrap:wrap;font-size:14px;box-shadow:0 -6px 24px rgba(0,0,0,.35);';
         bar.innerHTML =
             '<span>🍪 Мы используем технические cookies для работы входа в личный кабинет. ' +
-            'Подробнее — на странице <a href="/terms" style="color:#58a6ff">условий использования</a>.</span>' +
+            'Подробнее: <a href="/terms" style="color:#58a6ff">Пользовательское соглашение</a> · ' +
+            '<a href="/privacy" style="color:#58a6ff">Политика конфиденциальности</a>.</span>' +
             '<button type="button" id="cookie-consent-ok" style="' +
             'background:#238636;color:#fff;border:none;border-radius:999px;padding:8px 22px;font-weight:600;cursor:pointer;' +
             '">Понятно</button>';

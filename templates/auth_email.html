@@ -125,7 +125,11 @@
     </div>
 </div>
 
-{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
+<footer class="container py-4 d-flex justify-content-center gap-3 flex-wrap">
+    <a href="/terms">Пользовательское соглашение</a>
+    <a href="/privacy">Политика конфиденциальности</a>
+    <a href="/">Главная</a>
+</footer>
 {% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

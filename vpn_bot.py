@@ -98,7 +98,7 @@ async def buy_cmd(message: Message):
 
     from aiogram.types import BufferedInputFile
 
-    config_file = BufferedInputFile(result.encode('utf-8'), filename="AmneziaWG_config.conf")
+    config_file = BufferedInputFile(result.encode('utf-8'), filename="amneziawg.conf")
     await message.answer_document(config_file, caption="Вот ваш файл подключения! Импортируйте его в приложение AmneziaWG.")
 
 @dp.message(Command("disable"))

@@ -156,7 +156,10 @@
 
             </div>
             <div class="text-center mt-3">
-                <a href="/terms" class="text-muted small">Условия использования и политика конфиденциальности</a>
+                <div class="d-flex justify-content-center gap-3 flex-wrap">
+                    <a href="/terms" class="text-muted small">Пользовательское соглашение</a>
+                    <a href="/privacy" class="text-muted small">Политика конфиденциальности</a>
+                </div>
             </div>
         </div>
     </div>
@@ -188,7 +191,6 @@
     });
 </script>
 
-{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
 {% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

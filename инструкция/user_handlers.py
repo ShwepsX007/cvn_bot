@@ -69,7 +69,7 @@ async def check_and_clean_expired(tg_id: int):
 @user_router.message(Command("start"))
 async def start_cmd(message: Message, state: FSMContext):
     await state.clear() 
-    await message.answer("👋 Добро пожаловать! Я бот для заказа ультра-быстрого VPN с защитой от блокировок AmneziaWG.\n\nВыберите интересующий раздел меню:", reply_markup=main_reply_kb)
+    await message.answer("👋 Добро пожаловать! Здесь можно управлять подпиской и конфигурациями сервиса AmneziaWG.\n\nВыберите интересующий раздел меню:", reply_markup=main_reply_kb)
     await message.answer("Навигация:", reply_markup=get_main_keyboard())
 
 @user_router.message(F.text == "🚀 Главное меню")
@@ -113,23 +113,13 @@ async def show_profile(callback: CallbackQuery):
 @user_router.callback_query(F.data == "usr_description")
 async def show_description(callback: CallbackQuery):
     text = (
-        "ℹ️ <b>ОПИСАНИЕ УСЛУГ И УСЛОВИЯ ПОЛЬЗОВАНИЯ</b>\n\n"
-        "🌟 <b>Эксклюзивное качество и скорость:</b>\n"
-        "Мы следим за тем, чтобы на каждом нашем сервере располагалось <b>максимум 20 человек</b>. "
-        "Это гарантирует отсутствие перегрузок, стабильно высокую скорость и минимальный пинг для каждого пользователя. "
-        "Ваш интернет всегда будет «летать»!\n\n"
-        "🛒 <b>Как это работает?</b>\n"
-        "Вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и бот моментально выдает вам личный конфигурационный файл. "
-        "Достаточно добавить его в приложение, нажать одну кнопку — и вы в безопасном интернете без ограничений.\n\n"
+        "ℹ️ <b>ОПИСАНИЕ СЕРВИСА</b>\n\n"
+        "Сервис позволяет оформить доступ, получить конфигурационный файл и управлять подпиской через Telegram-бот или личный кабинет.\n\n"
         "📱 <b>Поддерживаемые платформы:</b>\n"
-        "Мы используем современный протокол AmneziaWG (надежная защита от блокировок), который легко настраивается на:\n"
-        "• <b>Android</b> (смартфоны и планшеты)\n"
-        "• <b>iOS</b> (iPhone / iPad)\n"
-        "• <b>Windows</b> (ПК и ноутбуки)\n\n"
-        "👑 <b>Выделенный личный сервер:</b>\n"
-        "Если вы хотите получить максимальную приватность и использовать 100% мощности сервера только для себя — "
-        "у нас есть услуга <b>Личного выделенного сервера</b>. Для заказа обратитесь в Поддержку с просьбой о выделенном сервере, "
-        "и мы настроим его специально для вас."
+        "Приложение AmneziaWG доступно для Android, iOS и компьютеров.\n\n"
+        "🧾 <b>Тарифы и доступ:</b>\n"
+        "Доступные локации, сроки и стоимость показываются перед оформлением заказа.\n\n"
+        "С документами сервиса можно ознакомиться по отдельным кнопкам в главном меню."
     )
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -321,7 +311,7 @@ async def show_help(callback: CallbackQuery):
         "💻 <a href='https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1'>Скачать для Windows (GitHub)</a>\n\n"
         "2️⃣ <b>Сохраните файл конфигурации</b> <code>.conf</code>, который бот прислал вам после оплаты или оформления пробного периода.\n\n"
         "3️⃣ Откройте приложение <b>AmneziaWG</b>, нажмите кнопку <b>«Добавить туннель»</b> (или знак ➕) и выберите скачанный файл.\n\n"
-        "4️⃣ Включите переключатель. <b>Готово!</b> Теперь вы в безопасном и свободном интернете! 🌍"
+        "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍"
     )
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)

@@ -97,12 +97,12 @@ def _site_globals(request: Request = None) -> dict:
     # Канонический URL (без query)
     canonical = site_url + path
     # OG-описание и заголовок по умолчанию — переопределяются в ручках через context
-    title_suffix = "AmneziaWG VPN — быстрый и свободный интернет"
+    title_suffix = "AmneziaWG VPN — сервис VPN"
     return {
         "site_url": site_url,
         "canonical_url": canonical,
         "og_title": title_suffix,
-        "og_description": "Быстрый VPN с протоколом AmneziaWG: обход блокировок, бесплатный пробный период, серверы в России и мире, оплата картой и вручную.",
+        "og_description": "Сервис VPN на базе AmneziaWG: управление подпиской, пробный период и оплата онлайн.",
         "og_image": f"{site_url}/static/apple-touch-icon.png",
         "page_title": title_suffix,
         "site_banner_html": bot_db.get_setting("site_banner_html") or "",
@@ -283,7 +283,7 @@ async def read_root(request: Request):
             "id": s_id, "name": name, "free_slots": free_slots if free_slots > 0 else 0
         })
 
-    # Получаем username бота для жёсткой ссылки в обход get_me() на случай Unauthorized.
+    # Получаем username бота для резервной ссылки вместо get_me() на случай Unauthorized.
     bot_username = None
     try:
         if BOT_USERNAME:
@@ -302,9 +302,9 @@ async def read_root(request: Request):
             "request": request,
             "servers": servers,
             "tg_bot_url": tg_bot_url,
-            "page_title": "AmneziaWG VPN — быстрый и свободный интернет без блокировок",
-            "og_title": "AmneziaWG VPN — быстрый и свободный интернет",
-            "og_description": "Обходите любые блокировки на высокой скорости с AmneziaWG. Пробный период 24 часа, бесплатный VPN на сайте, оплата картой или вручную. Серверы в России и Европе.",
+            "page_title": "AmneziaWG VPN — сервис VPN",
+            "og_title": "AmneziaWG VPN — сервис VPN",
+            "og_description": "Управление подпиской VPN, пробный период и оплата онлайн.",
         }
     )
 
@@ -399,12 +399,17 @@ def _check_captcha(captcha_id: str, captcha_answer: str) -> bool:
 
 @app.get("/terms")
 async def terms_page(request: Request):
-    """Публичная страница пользовательского соглашения / политики / cookies."""
+    """Публичная страница пользовательского соглашения."""
     return templates.TemplateResponse(request=request, name="terms.html", context={"request": request})
+
+@app.get("/privacy")
+async def privacy_page(request: Request):
+    """Публичная страница политики конфиденциальности."""
+    return templates.TemplateResponse(request=request, name="privacy.html", context={"request": request})
 
 
 # ==================== БЕСПЛАТНЫЙ VPN НА САЙТЕ ====================
-# Поток (строго в этом порядке): /free (инструкция+условия+реклама)
+# Поток (строго в этом порядке): /free (инструкция и условия)
 #   -> /free/config (выбор сервера + капча -> «Получить» либо «Продлить»)
 # Конфиг живет free_hours; продление - только с этой же страницы; истекает и забыли - удаляется.
 
@@ -436,7 +441,8 @@ async def free_config_page(request: Request):
         return templates.TemplateResponse(request=request, name="free_config.html", context={
             "request": request, "mode": "active", "msg": request.query_params.get("msg"),
             "error": request.query_params.get("error"), "srv_name": srv_name,
-            "expires_at": exp, "token": token, "server_id": server_id, "free_hours": hours,
+            "expires_at": exp, "token": token, "server_id": server_id,
+            "access_id": acc_id, "free_hours": hours,
         })
 
     # активной записи нет -> предлагаем выбор свободного бесплатного сервера
@@ -510,7 +516,7 @@ async def free_download(token: str):
     return Response(
         content=config_text,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename=FREE_{access_id}.conf"}
+        headers={"Content-Disposition": f"attachment; filename=free{access_id}.conf"}
     )
 
 @app.get("/free/qr/{token}")
@@ -579,7 +585,7 @@ async def auth_telegram(request: Request):
 @app.get("/auth/bot")
 async def auth_bot(request: Request):
     """Вход в кабинет по одноразовой ссылке, которую выдает бот (/start web_login).
-    Замена Telegram-виджету: работает даже там, где виджет заблокирован."""
+    Замена Telegram-виджету: работает, если виджет не отображается."""
     token = str(request.query_params.get("token") or "")
     tg_id = await asyncio.to_thread(bot_db.consume_tg_login_token, token) if token else None
     if not tg_id:

@@ -44,6 +44,8 @@
         </div>
         <div class="d-flex gap-2">
             <a href="/" class="btn btn-outline-light btn-sm rounded-pill px-3">🏠 Главная</a>
+            <a href="/terms" class="btn btn-outline-light btn-sm rounded-pill px-3">Пользовательское соглашение</a>
+            <a href="/privacy" class="btn btn-outline-light btn-sm rounded-pill px-3">Политика конфиденциальности</a>
             <a href="/free" class="btn btn-success btn-sm rounded-pill px-3">🎁 Бесплатный VPN</a>
             {% if is_admin %}
             <a href="/admin/web" class="btn btn-warning btn-sm rounded-pill px-3">🛠 Админка</a>
@@ -56,23 +58,13 @@
 <div class="container pb-5">
 
 {% if not accepted_tos %}
-    <!-- ===================== ЭКРАН ПРИНЯТИЯ СОГЛАШЕНИЯ ===================== -->
+    <!-- Экран ознакомления с правилами -->
     <div class="card card-custom p-4 p-md-5 mb-4">
-        <h4 class="fw-bold mb-3">📜 Пользовательское соглашение и Политика конфиденциальности</h4>
-        <div class="mb-3">
-            <b>1. Общие положения</b><br>
-            Используя данный сервис, вы принимаете условия предоставления услуг VPN. Сервис предоставляется «как есть» без гарантий абсолютной бесперебойности.
-        </div>
-        <div class="mb-3">
-            <b>2. Политика конфиденциальности</b><br>
-            • Сервис собирает только базовую информацию из вашего профиля Telegram (ID, имя и username) для привязки и управления подпиской.<br>
-            • Мы не ведем логи вашего трафика, не отслеживаем посещаемые ресурсы и не перехватываем скачиваемые файлы.<br>
-            • Ваш IP-адрес используется протоколом WireGuard исключительно для поддержания активного соединения с сервером.
-        </div>
-        <div class="mb-4">
-            <b>3. Правила использования</b><br>
-            • Строго запрещается использование сервиса для любой незаконной деятельности (спам, кардинг, DDoS-атаки, мошенничество и т.д.).<br>
-            • При поступлении официальных жалоб (Abuse) на вашу активность, мы оставляем за собой право заблокировать учетную запись без возврата средств.
+        <h4 class="fw-bold mb-3">📜 Перед продолжением</h4>
+        <p>Ознакомьтесь с документами сервиса. Для использования личного кабинета необходимо принять Пользовательское соглашение.</p>
+        <div class="d-flex gap-2 flex-wrap mb-4">
+            <a class="btn btn-outline-primary rounded-pill" href="/terms" target="_blank" rel="noopener">Пользовательское соглашение</a>
+            <a class="btn btn-outline-primary rounded-pill" href="/privacy" target="_blank" rel="noopener">Политика конфиденциальности</a>
         </div>
         <form method="post" action="/web/accept_tos">
             <button type="submit" class="btn btn-primary btn-lg rounded-pill px-5">✅ Принять соглашение и продолжить</button>
@@ -196,9 +188,9 @@
             </h2>
             <div id="accDesc" class="accordion-collapse collapse" data-bs-parent="#infoAccordion">
                 <div class="accordion-body">
-                    <p><b>Эксклюзивное качество и скорость:</b> на каждом сервере не более 20 человек — это гарантирует стабильно высокую скорость и минимальный пинг.</p>
+                    <p>На серверах действует лимит подключений, чтобы распределять доступ между пользователями.</p>
                     <p><b>Как это работает:</b> вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и сервис моментально выдает конфигурационный файл.</p>
-                    <p><b>Поддерживаемые платформы:</b> Android, iOS, Windows — протокол AmneziaWG с защитой от блокировок.</p>
+                    <p><b>Поддерживаемые платформы:</b> Android, iOS и Windows. Для подключения используется приложение AmneziaWG.</p>
                     <p><b>Выделенный личный сервер:</b> для заказа обратитесь в поддержку ниже.</p>
                 </div>
             </div>
@@ -481,7 +473,6 @@ async function sendSupport() {
 }
 </script>
 
-{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
 {% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

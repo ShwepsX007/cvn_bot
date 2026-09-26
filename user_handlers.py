@@ -44,7 +44,7 @@ class MandatoryTosMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         # 2. Пропускаем коллбеки кнопок, которые относятся к принятию правил
-        if isinstance(event, CallbackQuery) and event.data in ["usr_tos", "usr_tos_accept"]:
+        if isinstance(event, CallbackQuery) and event.data in ["usr_tos", "usr_terms", "usr_privacy", "usr_tos_accept"]:
             return await handler(event, data)
 
         # 3. Проверяем статус соглашения в базе
@@ -55,8 +55,12 @@ class MandatoryTosMiddleware(BaseMiddleware):
 
         # 4. Если не принял — блокируем действие и присылаем правила
         if not accepted:
-            text = "⚠️ <b>Доступ ограничен</b>\n\nДля использования бота вы должны ознакомиться и принять Пользовательское соглашение."
-            builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="📜 Прочитать и принять", callback_data="usr_tos"))
+            text = "⚠️ <b>Доступ пока недоступен</b>\n\nДля использования бота вы должны ознакомиться и принять Пользовательское соглашение."
+            builder = InlineKeyboardBuilder()
+            builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", callback_data="usr_terms"))
+            builder.add(InlineKeyboardButton(text="🔐 Политика конфиденциальности", callback_data="usr_privacy"))
+            builder.add(InlineKeyboardButton(text="✅ Принять соглашение", callback_data="usr_tos_accept"))
+            builder.adjust(1)
             
             if isinstance(event, Message):
                 await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -120,8 +124,9 @@ def get_main_keyboard():
     builder.add(InlineKeyboardButton(text="ℹ️ Описание и условия", callback_data="usr_description"))
     builder.add(InlineKeyboardButton(text="📚 Инструкция по настройке", callback_data="usr_help"))
     builder.add(InlineKeyboardButton(text="🤝 Поддержка", callback_data="usr_support"))
-    builder.add(InlineKeyboardButton(text="📜 Соглашение и Политика", callback_data="usr_tos"))
-    builder.adjust(1, 1, 1, 1, 2, 2)
+    builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", callback_data="usr_terms"))
+    builder.add(InlineKeyboardButton(text="🔐 Политика конфиденциальности", callback_data="usr_privacy"))
+    builder.adjust(1, 1, 1, 1, 2, 2, 1, 1)
     return builder.as_markup()
 
 async def check_and_clean_expired(tg_id: int):
@@ -184,11 +189,15 @@ async def start_cmd(message: Message, state: FSMContext, command: CommandObject)
             "👋 <b>Добро пожаловать!</b>\n\n"
             "Перед началом использования нашего VPN-сервиса, пожалуйста, ознакомьтесь с Пользовательским соглашением и Политикой конфиденциальности."
         )
-        builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="📜 Открыть соглашение", callback_data="usr_tos"))
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", callback_data="usr_terms"))
+        builder.add(InlineKeyboardButton(text="🔐 Политика конфиденциальности", callback_data="usr_privacy"))
+        builder.add(InlineKeyboardButton(text="✅ Принять соглашение", callback_data="usr_tos_accept"))
+        builder.adjust(1)
         await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         return
 
-    await message.answer("👋 Добро пожаловать! Я бот для заказа ультра-быстрого VPN с защитой от блокировок AmneziaWG.\n\nВыберите интересующий раздел меню:", reply_markup=main_reply_kb)
+    await message.answer("👋 Добро пожаловать! Здесь можно управлять подпиской и конфигурациями сервиса AmneziaWG.\n\nВыберите интересующий раздел меню:", reply_markup=main_reply_kb)
     await message.answer("Навигация:", reply_markup=get_main_keyboard())
 
 @user_router.message(F.text == "🚀 Главное меню")
@@ -378,23 +387,13 @@ async def show_profile(callback: CallbackQuery):
 @user_router.callback_query(F.data == "usr_description")
 async def show_description(callback: CallbackQuery):
     text = (
-        "ℹ️ <b>ОПИСАНИЕ УСЛУГ И УСЛОВИЯ ПОЛЬЗОВАНИЯ</b>\n\n"
-        "🌟 <b>Эксклюзивное качество и скорость:</b>\n"
-        "Мы следим за тем, чтобы на каждом нашем сервере располагалось <b>максимум 20 человек</b>. "
-        "Это гарантирует отсутствие перегрузок, стабильно высокую скорость и минимальный пинг для каждого пользователя. "
-        "Ваш интернет всегда будет «летать»!\n\n"
-        "🛒 <b>Как это работает?</b>\n"
-        "Вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и бот моментально выдает вам личный конфигурационный файл. "
-        "Достаточно добавить его в приложение, нажать одну кнопку — и вы в безопасном интернете без ограничений.\n\n"
+        "ℹ️ <b>ОПИСАНИЕ СЕРВИСА</b>\n\n"
+        "Сервис позволяет оформить доступ, получить конфигурационный файл и управлять подпиской через Telegram-бот или личный кабинет.\n\n"
         "📱 <b>Поддерживаемые платформы:</b>\n"
-        "Мы используем современный протокол AmneziaWG (надежная защита от блокировок), который легко настраивается на:\n"
-        "• <b>Android</b> (смартфоны и планшеты)\n"
-        "• <b>iOS</b> (iPhone / iPad)\n"
-        "• <b>Windows</b> (ПК и ноутбуки)\n\n"
-        "👑 <b>Выделенный личный сервер:</b>\n"
-        "Если вы хотите получить максимальную приватность и использовать 100% мощности сервера только для себя — "
-        "у нас есть услуга <b>Личного выделенного сервера</b>. Для заказа обратитесь в Поддержку с просьбой о выделенном сервере, "
-        "и мы настроим его специально для вас."
+        "Для подключения используйте приложение AmneziaWG на Android, iOS или компьютере.\n\n"
+        "🧾 <b>Тарифы и доступ:</b>\n"
+        "Доступные локации, сроки и стоимость показываются перед оформлением заказа. Бесплатный доступ и его срок указаны на сайте.\n\n"
+        "С документами сервиса можно ознакомиться по отдельным кнопкам в главном меню."
     )
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -674,7 +673,7 @@ async def show_help(callback: CallbackQuery):
         "💻 <a href='https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1'>Скачать для Windows (GitHub)</a>\n\n"
         "2️⃣ <b>Сохраните файл конфигурации</b> <code>.conf</code>, который бот прислал вам после оплаты или оформления пробного периода.\n\n"
         "3️⃣ Откройте приложение <b>AmneziaWG</b>, нажмите кнопку <b>«Добавить туннель»</b> (или знак ➕) и выберите скачанный файл.\n\n"
-        "4️⃣ Включите переключатель. <b>Готово!</b> Теперь вы в безопасном и свободном интернете! 🌍"
+        "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍"
     )
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
@@ -703,37 +702,54 @@ async def process_support_message(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка отправки.")
     await state.clear()
 
-@user_router.callback_query(F.data == "usr_tos")
-async def show_tos(callback: CallbackQuery):
-    text = (
-        "📜 <b>ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ И ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ</b>\n\n"
-        "<b>1. Общие положения</b>\n"
-        "Используя данного бота, вы принимаете условия предоставления услуг VPN. "
-        "Сервис предоставляется «как есть» без гарантий абсолютной бесперебойности.\n\n"
-        "<b>2. Политика конфиденциальности</b>\n"
-        "• Сервис собирает <b>только базовую информацию</b> из вашего профиля (Telegram ID, имя и username) для привязки и управления подпиской.\n"
-        "• Мы <b>НЕ ВЕДЕМ</b> логи вашего трафика, не отслеживаем посещаемые ресурсы и не перехватываем скачиваемые файлы.\n"
-        "• Ваш IP-адрес используется протоколом WireGuard исключительно временно для поддержания активного соединения с сервером.\n\n"
-        "<b>3. Правила использования</b>\n"
-        "• Строго запрещается использование сервиса для любой незаконной деятельности (спам, кардинг, DDoS-атаки, мошенничество и т.д.).\n"
-        "• При поступлении официальных жалоб (Abuse) на вашу активность со стороны дата-центра, мы оставляем за собой право заблокировать вашу учетную запись без возврата средств.\n\n"
-        "<i>Нажимая кнопку ниже, вы подтверждаете свое согласие с данными правилами и условиями.</i>"
-    )
-    
+def _legal_doc_keyboard(other_callback: str, other_label: str, accepted: bool):
     builder = InlineKeyboardBuilder()
-    
-    profile = db.get_user_profile(callback.from_user.id)
-    accepted = False
-    if profile and len(profile) > 3 and profile[3] == 1:
-        accepted = True
-        
+    builder.add(InlineKeyboardButton(text=other_label, callback_data=other_callback))
     if not accepted:
-        builder.add(InlineKeyboardButton(text="✅ Принять соглашение", callback_data="usr_tos_accept"))
-    else:
-        builder.add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
-        
+        builder.add(InlineKeyboardButton(text="✅ Принять Пользовательское соглашение", callback_data="usr_tos_accept"))
+    builder.add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     builder.adjust(1)
-    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    return builder.as_markup()
+
+
+def _has_accepted_terms(tg_id: int) -> bool:
+    profile = db.get_user_profile(tg_id)
+    return bool(profile and len(profile) > 3 and profile[3] == 1)
+
+
+@user_router.callback_query(F.data.in_({"usr_tos", "usr_terms"}))
+async def show_terms(callback: CallbackQuery):
+    text = (
+        "📄 <b>ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ</b>\n\n"
+        "<b>1. Сервис.</b> Сервис предоставляет управление подпиской и выдачу конфигураций VPN. Используя сервис, вы принимаете это соглашение и знакомитесь с Политикой конфиденциальности.\n\n"
+        "<b>2. Учетная запись и доступ.</b> Срок и состав доступа отображаются при оформлении. Пользователь отвечает за сохранность учетных данных и конфигурационного файла. Не передавайте конфигурацию другим лицам.\n\n"
+        "<b>3. Использование.</b> Запрещено использовать сервис для незаконных действий, спама, мошенничества, атак на сети и устройства или нарушения прав других лиц. При выявлении злоупотреблений доступ может быть приостановлен.\n\n"
+        "<b>4. Оплата и работа сервиса.</b> Стоимость и срок показываются до оплаты. Сервис предоставляется «как есть»; возможны временные перерывы и плановые работы. Если оплаченная услуга не предоставлена, обратитесь в поддержку для проверки и решения вопроса.\n\n"
+        "Актуальная версия соглашения постоянно доступна в этом меню и на сайте."
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=_legal_doc_keyboard("usr_privacy", "🔐 Политика конфиденциальности", _has_accepted_terms(callback.from_user.id)),
+        parse_mode="HTML",
+    )
+
+
+@user_router.callback_query(F.data == "usr_privacy")
+async def show_privacy(callback: CallbackQuery):
+    text = (
+        "🔐 <b>ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ</b>\n\n"
+        "<b>Какие данные обрабатываются:</b> Telegram ID, имя и username; адрес электронной почты и хэш пароля при входе по почте; сведения о тарифе, сроке доступа и выданной конфигурации; сведения о заказе, статусе оплаты и обращения в поддержку.\n\n"
+        "Для проверки бесплатного доступа используется IP-адрес устройства; он сохраняется в записи такого доступа. Сайт использует техническую сессионную cookie и сохраняет настройку информационного уведомления в браузере.\n\n"
+        "<b>Зачем и кому:</b> данные нужны для работы учетной записи, выдачи доступа, обработки платежей и обращений. В необходимом объеме они могут передаваться Telegram, почтовым и платежным провайдерам и поставщикам серверной инфраструктуры. Данные не продаются.\n\n"
+        "Информация хранится в течение срока, необходимого для работы сервиса, поддержки и выполнения применимых требований. По вопросам исправления или удаления данных обратитесь в поддержку.\n\n"
+        "Полная актуальная версия постоянно доступна на сайте по кнопке «Политика конфиденциальности»."
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=_legal_doc_keyboard("usr_terms", "📄 Пользовательское соглашение", _has_accepted_terms(callback.from_user.id)),
+        parse_mode="HTML",
+    )
+
 
 @user_router.callback_query(F.data == "usr_tos_accept")
 async def accept_tos_cb(callback: CallbackQuery):
@@ -749,7 +765,7 @@ async def accept_tos_cb(callback: CallbackQuery):
     await callback.answer("✅ Вы успешно приняли Пользовательское соглашение!", show_alert=True)
     
     await callback.message.edit_text(
-        "👋 Добро пожаловать! Я бот для заказа ультра-быстрого VPN с защитой от блокировок AmneziaWG.\n\nВыберите интересующий раздел меню:", 
+        "👋 Добро пожаловать! Здесь можно управлять подпиской и конфигурациями сервиса AmneziaWG.\n\nВыберите интересующий раздел меню:",
         reply_markup=get_main_keyboard()
     )
 

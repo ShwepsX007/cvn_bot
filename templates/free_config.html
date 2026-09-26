@@ -39,7 +39,11 @@
             <h4 class="fw-bold mb-0">Получить бесплатный конфиг</h4>
             <small>шаг 2 из 2 · на {{ free_hours }} ч, продление так же, с этой страницы</small>
         </div>
-        <a href="/free" class="btn btn-light btn-sm rounded-pill px-3">← К инструкции</a>
+        <div class="d-flex gap-2 flex-wrap">
+            <a href="/terms" class="btn btn-light btn-sm rounded-pill px-3">Пользовательское соглашение</a>
+            <a href="/privacy" class="btn btn-light btn-sm rounded-pill px-3">Политика конфиденциальности</a>
+            <a href="/free" class="btn btn-light btn-sm rounded-pill px-3">← К инструкции</a>
+        </div>
     </div>
 </div>
 
@@ -55,7 +59,7 @@
         <p class="text-muted mb-4">Сервер: <b>{{ srv_name }}</b> · действует до: <b>{{ expires_at }}</b> (UTC)</p>
 
         <div class="d-flex justify-content-center flex-wrap gap-3 mb-4">
-            <a href="/free/download/{{ token }}" class="btn btn-primary btn-lg rounded-pill px-4 fw-bold">⬇️ Скачать FREE.conf</a>
+            <a href="/free/download/{{ token }}" class="btn btn-primary btn-lg rounded-pill px-4 fw-bold">⬇️ Скачать free{{ access_id }}.conf</a>
         </div>
 
         <div class="mx-auto mb-4 p-3 bg-white rounded-4" style="max-width:220px">
@@ -151,7 +155,6 @@
     });
 </script>
 
-{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
 {% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

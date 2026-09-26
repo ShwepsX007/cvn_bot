@@ -175,7 +175,7 @@ def _send_resend(to: str, subject: str, html: str) -> tuple[bool, str]:
         body = e.read().decode("utf-8", "replace")[:300]
         if e.code == 403 and "1010" in body:
             return False, (
-                "Cloudflare заблокировал запрос к Resend (код 1010) из-за репутации IP сервера. "
+                "Cloudflare отклонил запрос к Resend (код 1010) из-за репутации IP сервера. "
                 "Вариант: используйте SMTP (Яндекс/Mail.ru) - задайте SMTP-строки и mail_mode=smtp."
             )
         return False, f"Resend HTTP {e.code}: {body}"

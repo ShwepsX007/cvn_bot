@@ -31,7 +31,11 @@
             <div class="col-md-8">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2>👤 Личный кабинет (ID: {{ tg_id }})</h2>
-                    <a href="/" class="btn btn-outline-secondary btn-sm">На главную</a>
+                    <nav class="d-flex gap-2 flex-wrap">
+                        <a href="/terms" class="btn btn-outline-secondary btn-sm">Пользовательское соглашение</a>
+                        <a href="/privacy" class="btn btn-outline-secondary btn-sm">Политика конфиденциальности</a>
+                        <a href="/" class="btn btn-outline-secondary btn-sm">На главную</a>
+                    </nav>
                 </div>
 
                 <h4 class="mb-3">Ваши активные подписки:</h4>
@@ -67,7 +71,6 @@
         </div>
     </div>
 
-{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
 {% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>
