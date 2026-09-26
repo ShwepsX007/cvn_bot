@@ -16,7 +16,6 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             display: flex;
             flex-direction: column;
-            justify-content: center;
         }
         .login-card {
             border: none;
@@ -42,7 +41,7 @@
 <meta name="twitter:image" content="{{ og_image }}">
 </head>
 <body>
-<div class="container">
+<div class="container auth-main">
     <div class="row justify-content-center">
         <div class="col-md-6 col-lg-5">
             <div class="card login-card p-4 p-md-5 bg-white text-center">
@@ -126,11 +125,11 @@
     </div>
 </div>
 
-<footer class="container py-4 d-flex justify-content-center gap-3 flex-wrap">
+<footer class="container auth-footer py-4 d-flex justify-content-center gap-3 flex-wrap">
     <a href="/terms">Пользовательское соглашение</a>
     <a href="/privacy">Политика конфиденциальности</a>
     <a href="/">Главная</a>
 </footer>
-{% if analytics_html %}{{ analytics_html|safe }}{% endif %}
+{% if analytics_html %}<div class="auth-analytics">{{ analytics_html|safe }}</div>{% endif %}
 </body>
 </html>
