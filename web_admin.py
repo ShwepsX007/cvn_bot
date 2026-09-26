@@ -1,5 +1,5 @@
 """
-Веб-админка AmneziaWG VPN (управление через сайт).
+Веб-админка сервиса AmneziaWG (управление через сайт).
 
 Доступ: только пользователи, вошедшие в кабинет (Telegram-виджет, кнопка через бота
 или почта) и имеющие права администратора:
@@ -56,8 +56,8 @@ SETTING_LABELS = {
     "mail_resend_key": "Resend API-ключ",
     "container_autoupdate": "Автообновление AWG-контейнера (on/off)",
     "node_update_report": "Отчет автообновления (служебное)",
-    "free_hours": "Бесплатный VPN: срок конфига (часов)",
-    "free_remind_minutes": "Бесплатный VPN: напоминание в TG за (мин)",
+    "free_hours": "Бесплатный доступ: срок конфига (часов)",
+    "free_remind_minutes": "Бесплатный доступ: напоминание в TG за (мин)",
     "site_banner_html": "Пользовательский рекламный HTML (не отображается на публичных страницах до проверки)",
     "analytics_html": "HTML-код аналитики/счётчика (вставляется перед </body> всех страниц)",
 }
@@ -238,7 +238,7 @@ async def admin_server_add(request: Request, ip: str = Form(...), name: str = Fo
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
     ip = ip.strip()
-    name = name.strip() or "VPN Server"
+    name = name.strip() or "Сервер сервиса"
     if not ip:
         return _back("/admin/web/servers", error="Введите IP сервера.")
     try:
@@ -270,7 +270,7 @@ async def admin_server_update(
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
     try:
-        db.rename_server(server_id, name.strip() or "VPN Server")
+        db.rename_server(server_id, name.strip() or "Сервер сервиса")
         db.set_server_limit(server_id, int(max_users))
         for period, price in (("price_1d", price_1d), ("price_7d", price_7d), ("price_30d", price_30d)):
             if int(price) > 0:
@@ -358,7 +358,7 @@ async def server_wizard_run(request: Request,
         return RedirectResponse(url="/login")
 
     ip = ip.strip()
-    name = name.strip() or "VPN Server"
+    name = name.strip() or "Сервер сервиса"
     if not ip:
         return _back("/admin/web/servers/wizard", error="Укажите IP нового сервера.")
 
@@ -580,12 +580,12 @@ async def admin_mailtest(request: Request, to: str = Form(...)):
     site_url = (db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
     html = mailer._letter_html(
         "✉️ Почта работает!",
-        "Это тестовое письмо из веб-админки AmneziaWG VPN. Если оно пришло во <b>входящие</b> (а не в спам) - настройка почты удалась, регистрация по почте будет работать.",
+        "Это тестовое письмо из веб-админки сервиса AmneziaWG. Если оно пришло во <b>входящие</b> (а не в спам) - настройка почты удалась, регистрация по почте будет работать.",
         site_url,
         "Открыть сайт",
         "Письмо отправлено администратором вручную для проверки доставки."
     )
-    ok, err = await asyncio.to_thread(mailer.send_email, to, "Тестовое письмо — AmneziaWG VPN", html)
+    ok, err = await asyncio.to_thread(mailer.send_email, to, "Тестовое письмо — сервис AmneziaWG", html)
     print(f"MAIL TEST to {to}: ok={ok} err={err}")
     if ok:
         return _back("/admin/web/settings", msg=f"Письмо принято почтовым сервисом ({mailer.describe()}). Проверьте {to}: входящие И ПАПКУ СПАМ. Также проверьте вкладку Emails->Logs в личном кабинете Resend.")
@@ -610,4 +610,4 @@ async def admin_broadcast_send(request: Request, text: str = Form(...)):
         except Exception:
             failed += 1
         await asyncio.sleep(0.05)
-    return _back("/admin/web/broadcast", msg=f"Рассылка завершена: доставлено {sent}, не доставлено {failed} (заблокировали бота).")
+    return _back("/admin/web/broadcast", msg=f"Рассылка завершена: доставлено {sent}, не доставлено {failed} (чат был недоступен).")

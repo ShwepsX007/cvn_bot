@@ -3,7 +3,7 @@ import asyncio
 import shlex
 import os
 
-# Путь к known_hosts, где мы будем хранить отпечатки VPN-нод (вместо того, чтобы
+# Путь к known_hosts, где мы будем хранить отпечатки узлов сервиса (вместо того, чтобы
 # принимать любой ключ - так защита от MITM хотя бы между основным сервером и нодами).
 _KNOWN_HOSTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".known_hosts")
 # Чтобы не ломать существующую установку, по умолчанию продолжаем работать с
@@ -13,7 +13,7 @@ _HOST_KEY_STRATEGY = os.environ.get("SSH_HOST_KEY_POLICY", "accept-new")
 
 
 def _ssh_base_args(ip: str, port: int) -> list:
-    """Базовые аргументы SSH/SCP для подключения к VPN-ноде."""
+    """Базовые аргументы SSH/SCP для подключения к узлов сервисае."""
     return [
         "/usr/bin/ssh", "-p", str(port),
         "-o", f"StrictHostKeyChecking={_HOST_KEY_STRATEGY}",

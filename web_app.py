@@ -97,12 +97,12 @@ def _site_globals(request: Request = None) -> dict:
     # Канонический URL (без query)
     canonical = site_url + path
     # OG-описание и заголовок по умолчанию — переопределяются в ручках через context
-    title_suffix = "AmneziaWG VPN — сервис VPN"
+    title_suffix = "Сервис AmneziaWG"
     return {
         "site_url": site_url,
         "canonical_url": canonical,
         "og_title": title_suffix,
-        "og_description": "Сервис VPN на базе AmneziaWG: управление подпиской, пробный период и оплата онлайн.",
+        "og_description": "Сервис AmneziaWG: управление подпиской, пробный период и оплата онлайн.",
         "og_image": f"{site_url}/static/apple-touch-icon.png",
         "page_title": title_suffix,
         "site_banner_html": bot_db.get_setting("site_banner_html") or "",
@@ -167,7 +167,7 @@ async def delete_amnezia_peer(ip: str, port: int, peer_id: str):
         raise Exception(f"Ошибка SSH при удалении: {result}")
     print(f"[CLEANUP] Успешно удален {peer_id} на сервере {ip}")
 
-# === БЕСПЛАТНЫЙ VPN НА САЙТЕ (/free): истечение + напоминания в TG ===
+# === БЕСПЛАТНЫЙ ДОСТУП НА САЙТЕ (/free): истечение + напоминания в TG ===
 async def check_expired_free_accesses():
     """Каждые 5 минут: выключаем на нодах истекшие бесплатные конфиги (страница /free)."""
     try:
@@ -197,7 +197,7 @@ async def free_reminders_job():
             try:
                 await bot.send_message(
                     tg_id,
-                    "🎁 <b>Ваш бесплатный VPN скоро выключится!</b>\n\n"
+                    "🎁 <b>Ваш бесплатный доступ скоро завершится!</b>\n\n"
                     f"Сервер <b>{srv_name}</b>, окончание: {expires_at} (UTC). "
                     "Продлить можно заблаговременно и сколько угодно раз - через 2 шага на сайте:\n\n"
                     f"1) Откройте: {site_url}/free\n"
@@ -302,9 +302,9 @@ async def read_root(request: Request):
             "request": request,
             "servers": servers,
             "tg_bot_url": tg_bot_url,
-            "page_title": "AmneziaWG VPN — сервис VPN",
-            "og_title": "AmneziaWG VPN — сервис VPN",
-            "og_description": "Управление подпиской VPN, пробный период и оплата онлайн.",
+            "page_title": "Сервис AmneziaWG",
+            "og_title": "Сервис AmneziaWG",
+            "og_description": "Управление доступом, пробный период и оплата онлайн.",
         }
     )
 
@@ -408,7 +408,7 @@ async def privacy_page(request: Request):
     return templates.TemplateResponse(request=request, name="privacy.html", context={"request": request})
 
 
-# ==================== БЕСПЛАТНЫЙ VPN НА САЙТЕ ====================
+# ==================== БЕСПЛАТНЫЙ ДОСТУП НА САЙТЕ ====================
 # Поток (строго в этом порядке): /free (инструкция и условия)
 #   -> /free/config (выбор сервера + капча -> «Получить» либо «Продлить»)
 # Конфиг живет free_hours; продление - только с этой же страницы; истекает и забыли - удаляется.
@@ -1223,7 +1223,7 @@ async def download_config(request: Request, server_id: int):
         raise HTTPException(status_code=404, detail="Конфигурация еще не сохранена на сервере. Попробуйте продлить/переоформить доступ.")
 
     # Имя файла для скачивания отдельно от служебного идентификатора пира (uname/sub[2]) -
-    # тот трогать нельзя, он используется на VPN-сервере через SSH-скрипты.
+    # тот трогать нельзя, он используется на сервере сервиса через SSH-скрипты.
     # Требование клиентских приложений: без пробелов/скобок/подчеркиваний, короткое имя.
     return Response(
         content=config_text,

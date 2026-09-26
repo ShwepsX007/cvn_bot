@@ -36,7 +36,7 @@ main_reply_kb = ReplyKeyboardMarkup(
 
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="🛍 Купить / Продлить VPN", callback_data="usr_buy_choose_srv"))
+    builder.add(InlineKeyboardButton(text="🛍 Оформить / продлить доступ", callback_data="usr_buy_choose_srv"))
     builder.add(InlineKeyboardButton(text="👤 Мой профиль", callback_data="usr_profile"))
     builder.add(InlineKeyboardButton(text="ℹ️ Описание и условия", callback_data="usr_description"))
     builder.add(InlineKeyboardButton(text="📚 Инструкция по настройке", callback_data="usr_help"))
@@ -308,7 +308,7 @@ async def show_help(callback: CallbackQuery):
         "1️⃣ <b>Скачайте приложение AmneziaWG</b> на ваше устройство по ссылкам ниже:\n"
         "📱 <a href='https://play.google.com/store/apps/details?id=org.amnezia.awg'>Скачать для Android (Google Play)</a>\n"
         "🍏 <a href='https://apps.apple.com/us/app/amneziawg/id6478942365'>Скачать для iOS (App Store)</a>\n"
-        "💻 <a href='https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1'>Скачать для Windows (GitHub)</a>\n\n"
+        "💻 Для Windows получите ссылку на приложение через Поддержку.\n\n"
         "2️⃣ <b>Сохраните файл конфигурации</b> <code>.conf</code>, который бот прислал вам после оплаты или оформления пробного периода.\n\n"
         "3️⃣ Откройте приложение <b>AmneziaWG</b>, нажмите кнопку <b>«Добавить туннель»</b> (или знак ➕) и выберите скачанный файл.\n\n"
         "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍"

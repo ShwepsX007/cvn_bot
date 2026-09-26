@@ -44,7 +44,7 @@ async def check_expiring_soon():
         try:
             await bot.send_message(
                 tg_id, 
-                f"⚠️ <b>Внимание!</b>\nВаша подписка на VPN (Сервер: <b>{srv_name}</b>) истекает менее чем через <b>3 часа</b>.", 
+                f"⚠️ <b>Внимание!</b>\nВаша подписка на сервис (Сервер: <b>{srv_name}</b>) истекает менее чем через <b>3 часа</b>.",
                 parse_mode="HTML"
             )
             db.mark_notified_3h(tg_id, server_id)
@@ -59,7 +59,7 @@ async def check_expiring_1d():
         try:
             await bot.send_message(
                 tg_id, 
-                f"🔔 <b>Напоминание!</b>\nВаша подписка на VPN (Сервер: <b>{srv_name}</b>) истекает менее чем через <b>1 день</b>.", 
+                f"🔔 <b>Напоминание!</b>\nВаша подписка на сервис (Сервер: <b>{srv_name}</b>) истекает менее чем через <b>1 день</b>.",
                 parse_mode="HTML"
             )
             db.mark_notified_1d(tg_id, server_id)
@@ -74,7 +74,7 @@ async def check_expiring_3d():
         try:
             await bot.send_message(
                 tg_id, 
-                f"🔔 <b>Напоминание!</b>\nВаша подписка на VPN (Сервер: <b>{srv_name}</b>) истекает через <b>3 дня</b>.", 
+                f"🔔 <b>Напоминание!</b>\nВаша подписка на сервис (Сервер: <b>{srv_name}</b>) истекает через <b>3 дня</b>.",
                 parse_mode="HTML"
             )
             db.mark_notified_3d(tg_id, server_id)
@@ -94,7 +94,7 @@ async def check_expired_users():
             if "Ошибка" not in result:
                 db.deactivate_user(tg_id, server_id)
                 try:
-                    await bot.send_message(tg_id, f"⚠️ Срок действия вашей VPN-подписки (Сервер: <b>{srv_name}</b>) завершен. Конфигурация отключена.", parse_mode="HTML")
+                    await bot.send_message(tg_id, f"⚠️ Срок действия вашей подписки на сервис (Сервер: <b>{srv_name}</b>) завершен. Конфигурация отключена.", parse_mode="HTML")
                 except Exception as _e:
                     print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
                 try:

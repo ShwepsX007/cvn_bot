@@ -80,7 +80,7 @@ async def start_cmd(message: Message):
     conn.commit()
     conn.close()
 
-    await message.answer("Привет! Я бот для управления VPN. \nДля покупки доступа нажми /buy")
+    await message.answer("Привет! Я бот для управления сервисом. \nДля покупки доступа нажми /buy")
 
 @dp.message(Command("buy"))
 async def buy_cmd(message: Message):

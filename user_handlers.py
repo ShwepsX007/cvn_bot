@@ -114,9 +114,9 @@ main_reply_kb = ReplyKeyboardMarkup(
 
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="🛍 Купить / Продлить VPN", callback_data="usr_buy_choose_srv"))
+    builder.add(InlineKeyboardButton(text="🛍 Оформить / продлить доступ", callback_data="usr_buy_choose_srv"))
     builder.add(InlineKeyboardButton(
-        text="🎁 VPN бесплатно",
+        text="🎁 Бесплатный доступ",
         url=(db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")))
     builder.add(InlineKeyboardButton(text="🔑 Мои конфиги", callback_data="usr_my_configs"))
     builder.add(InlineKeyboardButton(text="👤 Мой профиль", callback_data="usr_profile"))
@@ -187,7 +187,7 @@ async def start_cmd(message: Message, state: FSMContext, command: CommandObject)
     if not profile or len(profile) <= 3 or profile[3] == 0:
         text = (
             "👋 <b>Добро пожаловать!</b>\n\n"
-            "Перед началом использования нашего VPN-сервиса, пожалуйста, ознакомьтесь с Пользовательским соглашением и Политикой конфиденциальности."
+            "Перед началом использования сервиса, пожалуйста, ознакомьтесь с Пользовательским соглашением и Политикой конфиденциальности."
         )
         builder = InlineKeyboardBuilder()
         builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", callback_data="usr_terms"))
@@ -298,7 +298,7 @@ async def my_configs(callback: CallbackQuery):
     active_subs = [s for s in subs if s[5] == 1]
 
     if not active_subs:
-        text = "🔑 У вас пока нет активных подписок. Оформите их в разделе «🛍 Купить / Продлить VPN»."
+        text = "🔑 У вас пока нет активных подписок. Оформите их в разделе «🛍 Оформить / продлить доступ»."
         builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
         return await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
@@ -351,7 +351,7 @@ async def mycfg_get(callback: CallbackQuery):
     qr_png = qrgen.make_qr_png(config_text)
     if qr_png:
         await callback.message.answer_photo(
-            BufferedInputFile(qr_png, filename="vpn_qr.png"),
+            BufferedInputFile(qr_png, filename="access_qr.png"),
             caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
         )
     await callback.answer()
@@ -670,7 +670,7 @@ async def show_help(callback: CallbackQuery):
         "1️⃣ <b>Скачайте приложение AmneziaWG</b> на ваше устройство по ссылкам ниже:\n"
         "📱 <a href='https://play.google.com/store/apps/details?id=org.amnezia.awg'>Скачать для Android (Google Play)</a>\n"
         "🍏 <a href='https://apps.apple.com/us/app/amneziawg/id6478942365'>Скачать для iOS (App Store)</a>\n"
-        "💻 <a href='https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1'>Скачать для Windows (GitHub)</a>\n\n"
+        "💻 Для Windows получите ссылку на приложение через Поддержку.\n\n"
         "2️⃣ <b>Сохраните файл конфигурации</b> <code>.conf</code>, который бот прислал вам после оплаты или оформления пробного периода.\n\n"
         "3️⃣ Откройте приложение <b>AmneziaWG</b>, нажмите кнопку <b>«Добавить туннель»</b> (или знак ➕) и выберите скачанный файл.\n\n"
         "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍"
@@ -721,7 +721,7 @@ def _has_accepted_terms(tg_id: int) -> bool:
 async def show_terms(callback: CallbackQuery):
     text = (
         "📄 <b>ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ</b>\n\n"
-        "<b>1. Сервис.</b> Сервис предоставляет управление подпиской и выдачу конфигураций VPN. Используя сервис, вы принимаете это соглашение и знакомитесь с Политикой конфиденциальности.\n\n"
+        "<b>1. Сервис.</b> Сервис предоставляет управление подпиской и выдачу конфигурационных файлов сервиса. Используя сервис, вы принимаете это соглашение и знакомитесь с Политикой конфиденциальности.\n\n"
         "<b>2. Учетная запись и доступ.</b> Срок и состав доступа отображаются при оформлении. Пользователь отвечает за сохранность учетных данных и конфигурационного файла. Не передавайте конфигурацию другим лицам.\n\n"
         "<b>3. Использование.</b> Запрещено использовать сервис для незаконных действий, спама, мошенничества, атак на сети и устройства или нарушения прав других лиц. При выявлении злоупотреблений доступ может быть приостановлен.\n\n"
         "<b>4. Оплата и работа сервиса.</b> Стоимость и срок показываются до оплаты. Сервис предоставляется «как есть»; возможны временные перерывы и плановые работы. Если оплаченная услуга не предоставлена, обратитесь в поддержку для проверки и решения вопроса.\n\n"
@@ -816,7 +816,7 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
         try:
             await bot.send_photo(
                 tg_id,
-                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                BufferedInputFile(qr_png, filename="access_qr.png"),
                 caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
             )
         except Exception as _e:
@@ -896,7 +896,7 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
         try:
             await bot.send_photo(
                 tg_id,
-                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                BufferedInputFile(qr_png, filename="access_qr.png"),
                 caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
             )
         except Exception as _e:

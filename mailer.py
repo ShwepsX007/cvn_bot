@@ -1,5 +1,5 @@
 """
-Отправка писем AmneziaWG VPN (подтверждение почты, сброс пароля, привязка к Telegram).
+Отправка писем сервиса AmneziaWG (подтверждение почты, сброс пароля, привязка к Telegram).
 
 Два транспорта (переключаются настройкой mail_mode в базе, задается в /admin):
 
@@ -26,7 +26,7 @@ from email.utils import formataddr
 
 import database as db
 
-BRAND = "AmneziaWG VPN"
+BRAND = "Сервис AmneziaWG"
 
 
 def _s(key, default=""):
@@ -88,26 +88,26 @@ def _letter_html(title: str, lead: str, btn_url: str, btn_text: str, note: str) 
 
 _TOKEN_KIND_INFO = {
     "verify": (
-        "Подтвердите почту — AmneziaWG VPN",
+        "Подтвердите почту — Сервис AmneziaWG",
         "/auth/email/verify?token=",
         "Подтверждение почты",
-        "Вы зарегистрировались на сайте AmneziaWG VPN. Нажмите кнопку, чтобы подтвердить этот адрес и активировать вход по почте.",
+        "Вы зарегистрировались в сервисе AmneziaWG. Нажмите кнопку, чтобы подтвердить этот адрес и активировать вход по почте.",
         "Подтвердить почту",
         "Ссылка действует 24 часа. Если это были не вы — просто проигнорируйте письмо.",
     ),
     "reset": (
-        "Сброс пароля — AmneziaWG VPN",
+        "Сброс пароля — Сервис AmneziaWG",
         "/auth/email/reset?token=",
         "Сброс пароля",
-        "Мы получили запрос на сброс пароля вашей учетной записи AmneziaWG VPN.",
+        "Мы получили запрос на сброс пароля вашей учетной записи сервиса AmneziaWG.",
         "Задать новый пароль",
         "Ссылка действует 1 час. Если запрос отправляли не вы — проигнорируйте письмо, пароль не изменится.",
     ),
     "link": (
-        "Привязка почты — AmneziaWG VPN",
+        "Привязка почты — Сервис AmneziaWG",
         "/auth/email/link?token=",
         "Привязка почты к аккаунту",
-        "Кто-то (надеемся, вы) привязывает эту почту к аккаунту AmneziaWG VPN в Telegram-боте или на сайте.",
+        "Кто-то (надеемся, вы) привязывает эту почту к аккаунту сервиса AmneziaWG в Telegram-боте или на сайте.",
         "Привязать почту",
         "Ссылка действует 2 часа. После привязки вы сможете входить в личный кабинет сайта и по почте, и через Telegram.",
     ),
@@ -199,7 +199,7 @@ def _send_smtp(to: str, subject: str, html: str) -> tuple[bool, str]:
     msg.attach(MIMEText(html_to_text(html), "plain", "utf-8"))
     msg.attach(MIMEText(html, "html", "utf-8"))
 
-    # "AmneziaWG VPN <no-reply@...>" -> части для formataddr
+    # "Сервис AmneziaWG <no-reply@...>" -> части для formataddr
     if "<" in sender and ">" in sender:
         name = sender.split("<")[0].strip().strip('"')
         addr = sender.split("<")[1].rstrip(">").strip()

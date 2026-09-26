@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Тесты бесплатного VPN на сайте (/free → /free/config → продление/скачивание/QR).
+Тесты бесплатного доступа на сайте (/free → /free/config → продление/скачивание/QR).
 Тяжелые побочки (SSH на нодах, Telegram-бот) подменяются фейками.
 Запуск: .testenv/bin/python -m pytest tests/test_free_pages.py -q
 """
@@ -150,7 +150,7 @@ def test_db_slots_and_expired():
 def test_free_page_renders(client):
     r = client.get("/free")
     assert r.status_code == 200
-    assert "Бесплатный VPN" in r.text
+    assert "Бесплатный доступ" in r.text
 
 
 def test_legal_documents_are_separate_and_public(client):
@@ -163,6 +163,11 @@ def test_legal_documents_are_separate_and_public(client):
     assert '<h1 class="h3 fw-bold mb-4">Политика конфиденциальности</h1>' in privacy.text
     assert 'href="/terms"' in home.text
     assert 'href="/privacy"' in home.text
+
+    public_pages = home.text + client.get("/free").text + terms.text + privacy.text
+    assert "VPN" not in public_pages.upper()
+    assert "Блокиров" not in public_pages
+    assert "Обход" not in public_pages
 
 
 def test_config_page_grant_mode_with_server(client):

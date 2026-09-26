@@ -28,7 +28,7 @@
 <meta property="og:description" content="{{ og_description }}">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:image" content="{{ og_image }}">
-<meta property="og:site_name" content="AmneziaWG VPN">
+<meta property="og:site_name" content="Сервис AmneziaWG">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ og_title }}">
 <meta name="twitter:description" content="{{ og_description }}">
@@ -46,7 +46,7 @@
             <a href="/" class="btn btn-outline-light btn-sm rounded-pill px-3">🏠 Главная</a>
             <a href="/terms" class="btn btn-outline-light btn-sm rounded-pill px-3">Пользовательское соглашение</a>
             <a href="/privacy" class="btn btn-outline-light btn-sm rounded-pill px-3">Политика конфиденциальности</a>
-            <a href="/free" class="btn btn-success btn-sm rounded-pill px-3">🎁 Бесплатный VPN</a>
+            <a href="/free" class="btn btn-success btn-sm rounded-pill px-3">🎁 Бесплатный доступ</a>
             {% if is_admin %}
             <a href="/admin/web" class="btn btn-warning btn-sm rounded-pill px-3">🛠 Админка</a>
             {% endif %}
@@ -138,7 +138,7 @@
 
     <!-- ===================== КУПИТЬ / ПРОДЛИТЬ ===================== -->
     <div class="card card-custom p-4 mb-4">
-        <h5 class="fw-bold mb-3">🛍 Купить / продлить VPN</h5>
+        <h5 class="fw-bold mb-3">🛍 Оформить / продлить доступ</h5>
         {% if servers %}
             {% for srv in servers %}
             <div class="border rounded-4 p-3 mb-3">
@@ -173,11 +173,11 @@
                         <li>Скачайте приложение AmneziaWG:
                             <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" target="_blank">Android</a> ·
                             <a href="https://apps.apple.com/us/app/amneziawg/id6478942365" target="_blank">iOS</a> ·
-                            <a href="https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1" target="_blank">Windows</a>
+                            <span>Windows — ссылка через поддержку</span>
                         </li>
                         <li>Скачайте файл конфигурации <code>.conf</code> из раздела «Мои подписки» выше.</li>
                         <li>Откройте приложение AmneziaWG, нажмите «Добавить туннель» (➕) и выберите скачанный файл.</li>
-                        <li>Включите переключатель. Готово — вы в безопасном интернете!</li>
+                        <li>Включите переключатель. Готово — подключение настроено.</li>
                     </ol>
                 </div>
             </div>

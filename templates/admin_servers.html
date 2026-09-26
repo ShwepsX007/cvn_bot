@@ -4,7 +4,7 @@
 <div class="card card-custom p-4 mb-4 border-warning" style="border-left:4px solid #ffc107">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
-            <h5 class="fw-bold mb-1">🧙‍♂️ Новый VPN-сервер? Запустите мастер установки</h5>
+            <h5 class="fw-bold mb-1">🧙‍♂️ Новый сервер для сервиса? Запустите мастер установки</h5>
             <small class="text-muted">Нужен только IP и root-пароль VPS: ключи, установка AmneziaWG, скрипты и занесение в базу — автоматически.</small>
         </div>
         <a href="/admin/web/servers/wizard" class="btn btn-warning rounded-pill px-4 fw-bold">🚀 Мастер установки</a>
@@ -71,7 +71,7 @@
                         onclick="return confirm('Обновить контейнер AWG на ноде {{ s.ip }} до свежей сборки?\n\nДаунтайм ~10 секунд, все выданные конфиги продолжат работать.')">🔄 Обновить AWG</button>
                 <button type="submit" formaction="/admin/web/servers/delete" name="mode" value="permanent" class="btn btn-outline-danger btn-sm rounded-pill"
                         title="Удалить из базы насовсем"
-                        onclick="return confirm('УДАЛИТЬ сервер #{{ s.id }} насовсем из базы?\n\nНа нем подписок: {{ s.subs_total }} (активных: {{ s.subs_active }}).\nСама VPN-нода не трогается, выданные конфиги доживут свой срок.')">🗑 Удалить</button>
+                        onclick="return confirm('УДАЛИТЬ сервер #{{ s.id }} насовсем из базы?\n\nНа нем подписок: {{ s.subs_total }} (активных: {{ s.subs_active }}).\nСама узел сервиса не трогается, выданные конфиги доживут свой срок.')">🗑 Удалить</button>
             </div>
         </div>
         <div class="row g-2 align-items-end">
