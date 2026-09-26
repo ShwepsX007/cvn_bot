@@ -178,6 +178,41 @@ def test_config_page_grant_mode_with_server(client):
     assert "Получить конфиг" in r.text
 
 
+def test_free_qr_uses_saved_config_unchanged(client, monkeypatch):
+    sid = add_free_server()
+    token = "qr-test-token"
+    bot_db.free_create_access(
+        "9.8.7.6", sid, "peer_qr", FAKE_CFG, live_expires(), download_token=token
+    )
+    encoded_text = []
+
+    def fake_make_qr_png(text):
+        encoded_text.append(text)
+        return b"test-png"
+
+    monkeypatch.setattr(web_app.qrgen, "make_qr_png", fake_make_qr_png)
+    response = client.get(f"/free/qr/{token}")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == b"test-png"
+    assert encoded_text == [FAKE_CFG]
+
+
+def test_active_free_qr_is_large_and_can_be_opened_full_size(client):
+    sid = add_free_server()
+    token = "qr-display-token"
+    bot_db.free_create_access(
+        "testclient", sid, "peer_qr", FAKE_CFG, live_expires(), download_token=token
+    )
+
+    response = client.get("/free/config")
+
+    assert response.status_code == 200
+    assert 'max-width:460px' in response.text
+    assert f'href="/free/qr/{token}" target="_blank"' in response.text
+
+
 def test_grant_flow_and_renew(client):
     sid = add_free_server()
     cap_id, cap_ans = get_captcha(client)

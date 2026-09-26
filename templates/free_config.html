@@ -62,10 +62,12 @@
             <a href="/free/download/{{ token }}" class="btn btn-primary btn-lg rounded-pill px-4 fw-bold">⬇️ Скачать free{{ access_id }}.conf</a>
         </div>
 
-        <div class="mx-auto mb-4 p-3 bg-white rounded-4" style="max-width:220px">
-            <img src="/free/qr/{{ token }}" alt="QR код конфигурации" class="img-fluid">
+        <div class="mx-auto mb-4 p-3 bg-white rounded-4" style="width:100%;max-width:460px">
+            <a href="/free/qr/{{ token }}" target="_blank" rel="noopener" aria-label="Открыть QR-код в полном размере">
+                <img src="/free/qr/{{ token }}" alt="QR код конфигурации" class="img-fluid" style="display:block;width:100%;height:auto;image-rendering:pixelated">
+            </a>
         </div>
-        <p class="small text-muted mb-4">Или наведите камеру на QR — в приложении AmneziaWG «Сканировать QR-код».</p>
+        <p class="small text-muted mb-4">Откройте сканер AmneziaWG и наведите камеру на QR-код. Если сканер не распознаёт код, нажмите на изображение, чтобы открыть его в полном размере.</p>
 
         <hr>
         <h6 class="fw-bold mt-4 mb-3">🔄 Продлить ещё на {{ free_hours }} ч</h6>
