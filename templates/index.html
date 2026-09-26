@@ -139,9 +139,11 @@
     <div class="row g-3 mb-3">
         <div class="col-md-3 col-6">
             <div class="stat-card">
-                <div class="label">Серверов онлайн</div>
+                <div class="label">Бесплатных серверов</div>
                 <div class="value">{{ servers|length }}</div>
-                <div class="sub"><span class="dot dot-green"></span>работают стабильно</div>
+                <div class="sub">
+                    {% if servers %}<span class="dot dot-green"></span>доступны{% else %}сейчас не настроены{% endif %}
+                </div>
             </div>
         </div>
         <div class="col-md-3 col-6">
@@ -192,7 +194,7 @@
         </div>
         {% endfor %}
         {% else %}
-        <div class="alert alert-warning rounded-3">Серверы временно недоступны.</div>
+        <div class="alert alert-warning rounded-3">Бесплатных серверов сейчас нет.</div>
         {% endif %}
     </div>
 </div>

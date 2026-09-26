@@ -153,6 +153,38 @@ def test_free_page_renders(client):
     assert "Бесплатный доступ" in r.text
 
 
+def test_homepage_shows_free_servers_and_free_capacity_only(client):
+    free_sid = add_free_server(name="🎁 FREE", max_users=4)
+    bot_db.add_server("10.0.0.2", "💳 PLAT", 2222)
+    conn = bot_db.get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM servers WHERE ip='10.0.0.2'")
+    paid_sid = cur.fetchone()[0]
+    conn.close()
+    bot_db.set_server_limit(paid_sid, 29)
+
+    bot_db.free_create_access(
+        "203.0.113.5", free_sid, "peer_free", FAKE_CFG, live_expires()
+    )
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Бесплатных серверов" in response.text
+    assert "🎁 FREE" in response.text
+    assert "Свободных мест: <b style=\"color:var(--oc-text);\">3</b>" in response.text
+    assert '<div class="value">3</div>' in response.text
+    assert "💳 PLAT" not in response.text
+
+
+def test_homepage_shows_empty_state_when_no_free_servers(client):
+    bot_db.add_server("10.0.0.2", "💳 PLAT", 2222)
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Бесплатных серверов сейчас нет." in response.text
+    assert "💳 PLAT" not in response.text
+
+
 def test_legal_documents_are_separate_and_public(client):
     terms = client.get("/terms")
     privacy = client.get("/privacy")

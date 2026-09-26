@@ -273,14 +273,17 @@ async def shutdown_event():
 
 @app.get("/")
 async def read_root(request: Request):
-    active_servers = bot_db.get_active_servers() or []
+    # Главная показывает только узлы, выделенные именно для бесплатной выдачи (/free),
+    # а не остаток мест на платных серверах.
+    active_servers = bot_db.get_active_free_servers() or []
     servers = []
 
     for s_id, ip, port, name, limit in active_servers:
-        paid_count = bot_db.count_paid_users_on_server(s_id) or 0
-        free_slots = limit - paid_count
+        free_users = bot_db.free_count_active_on_server(s_id) or 0
+        capacity = max(int(limit or 0), 0)
+        free_slots = max(capacity - int(free_users), 0)
         servers.append({
-            "id": s_id, "name": name, "free_slots": free_slots if free_slots > 0 else 0
+            "id": s_id, "name": name, "free_slots": free_slots
         })
 
     # Получаем username бота для резервной ссылки вместо get_me() на случай Unauthorized.
