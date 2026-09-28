@@ -1,0 +1,18 @@
+# Секреты и локальные конфиги (токен бота НЕ храним в репозитории!)
+config_tokens.py
+.session_secret
+
+# Базы данных и рабочие файлы
+*.db
+*.db-wal
+*.db-shm
+
+# Виртуальные окружения для тестов/запуска
+.testenv/
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

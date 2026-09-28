@@ -85,11 +85,11 @@
                     <button type="submit" class="btn btn-success w-100 rounded-pill">Сохранить пароль</button>
                 </form>
                 {% else %}
-                {% if bot_username %}
-                <p class="text-muted small mt-3">Откройте бота, чтобы получать конфиги и уведомления в Telegram:</p>
-                <a href="https://t.me/{{ bot_username }}" class="btn btn-outline-primary w-100 rounded-pill mb-2">💬 Открыть бота</a>
-                {% endif %}
                 <a href="/dashboard" class="btn btn-primary w-100 rounded-pill">Перейти в личный кабинет</a>
+                {% if bot_username %}
+                <p class="text-muted small mt-3 mb-0">По желанию привяжите Telegram (бот пришлет конфиги и уведомления) — это можно сделать и позже в кабинете:</p>
+                <a href="https://t.me/{{ bot_username }}" class="btn btn-outline-primary w-100 rounded-pill mt-2">💬 Открыть бота</a>
+                {% endif %}
                 {% endif %}
                 {% endif %}
 

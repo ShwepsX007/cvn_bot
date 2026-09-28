@@ -40,7 +40,11 @@
     <div class="container d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
             <h4 class="fw-bold mb-0">🔐 Личный кабинет</h4>
+            {% if is_virtual %}
+            <small>{{ display_name }} · вход по почте</small>
+            {% else %}
             <small>{{ display_name }} · ID {{ tg_id }}</small>
+            {% endif %}
         </div>
         <div class="d-flex gap-2">
             <a href="/" class="btn btn-outline-light btn-sm rounded-pill px-3">🏠 Главная</a>
@@ -74,6 +78,32 @@
 {% else %}
 
     <div id="alert-area"></div>
+
+    {% if is_virtual %}
+    <!-- ===================== TELEGRAM НЕ ПРИВЯЗАН (почтовый аккаунт) ===================== -->
+    <div class="card card-custom p-4 mb-4">
+        <h5 class="fw-bold mb-2">✈️ Telegram</h5>
+        <small class="text-muted d-block mb-3">
+            Ваш аккаунт зарегистрирован по почте — этого достаточно: покупка и скачивание конфигов работают прямо здесь.
+            По желанию привяжите Telegram: бот будет присылать конфиги, напоминания об окончании подписки и ответы поддержки в чат,
+            а подписки из почтового аккаунта объединятся с ним автоматически.
+        </small>
+        {% if bot_username %}
+        <div class="mb-2" style="min-height:48px;display:flex;align-items:center;">
+            <script async src="https://telegram.org/js/telegram-widget.js?22"
+                data-telegram-login="{{ bot_username }}"
+                data-size="large"
+                data-radius="12"
+                data-auth-url="{{ site_url }}/auth/telegram"
+                data-request-access="write">
+            </script>
+        </div>
+        <a class="btn btn-outline-primary rounded-pill btn-sm" href="https://t.me/{{ bot_username }}?start=web_login">
+            🤖 Привязать через бота (если виджет не отображается)
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <!-- ===================== МОИ ПОДПИСКИ ===================== -->
     <div class="card card-custom p-4 mb-4">
@@ -124,7 +154,11 @@
     <!-- ===================== ПОЧТА АККАУНТА ===================== -->
     <div class="card card-custom p-4 mb-4">
         <h5 class="fw-bold mb-2">📧 Почта</h5>
-        {% if bound_email %}
+        {% if is_virtual and bound_email %}
+            <p class="mb-1">Вход в кабинет: <b>{{ bound_email }}</b></p>
+            <small class="text-muted d-block mb-2">Входите по этой почте и паролю на странице входа (вкладка «Почта»).
+            Если привяжете Telegram выше — вход по нему тоже заработает, аккаунт останется одним.</small>
+        {% elif bound_email %}
             <p class="mb-1">Привязана: <b>{{ bound_email }}</b></p>
             <small class="text-muted d-block mb-2">По ней можно входить в кабинет на странице «Почта».
             {% if not email_has_password %}Пароль еще не задан — создайте его через «Забыли пароль» на странице входа.{% endif %}</small>
