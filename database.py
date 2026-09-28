@@ -25,7 +25,7 @@ def init_db():
                         ip TEXT UNIQUE,
                         port INTEGER DEFAULT 2222,
                         active INTEGER DEFAULT 1,
-                        name TEXT DEFAULT 'VPN Server',
+                        name TEXT DEFAULT 'Сервер сервиса',
                         max_users INTEGER DEFAULT 50,
                         price_1d INTEGER,
                         price_7d INTEGER,
@@ -82,7 +82,7 @@ def init_db():
         ('container_autoupdate', 'off'),
         # Текст последнего отчета автообновления (показывается на странице «Серверы»)
         ('node_update_report', ''),
-        # Бесплатный VPN на сайте: срок конфига в часах и напоминание в TG за N минут
+        # Бесплатный доступ на сайте: срок конфига в часах и напоминание в TG за N минут
         ('free_hours', '3'),
         ('free_remind_minutes', '30'),
         # Рекламный HTML-баннер, вставляемый внизу всех публичных страниц сайта.
@@ -178,7 +178,7 @@ def init_db():
         pass
 
     # Колонка для хранения текста конфигурации, чтобы отдавать скачивание с сайта
-    # в любой момент без повторного обращения по SSH к VPN-серверу
+    # в любой момент без повторного обращения по SSH к серверу сервиса
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN config_text TEXT")
     except sqlite3.OperationalError:
@@ -724,7 +724,7 @@ def set_server_active(server_id, active):
 
 def delete_server_permanently(server_id):
     """Полное удаление сервера из базы (в отличие от delete_server, который только выключает).
-    Сама VPN-нода при этом не трогается: выданные конфиги продолжат работать до истечения."""
+    Сама узел сервиса при этом не трогается: выданные конфиги продолжат работать до истечения."""
     conn = get_conn()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM servers WHERE id=?", (server_id,))

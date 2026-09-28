@@ -44,7 +44,7 @@ class MandatoryTosMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         # 2. Пропускаем коллбеки кнопок, которые относятся к принятию правил
-        if isinstance(event, CallbackQuery) and event.data in ["usr_tos", "usr_tos_accept"]:
+        if isinstance(event, CallbackQuery) and event.data in ["usr_tos", "usr_terms", "usr_privacy", "usr_tos_accept"]:
             return await handler(event, data)
 
         # 3. Проверяем статус соглашения в базе
@@ -55,8 +55,12 @@ class MandatoryTosMiddleware(BaseMiddleware):
 
         # 4. Если не принял — блокируем действие и присылаем правила
         if not accepted:
-            text = "⚠️ <b>Доступ ограничен</b>\n\nДля использования бота вы должны ознакомиться и принять Пользовательское соглашение."
-            builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="📜 Прочитать и принять", callback_data="usr_tos"))
+            text = "⚠️ <b>Доступ пока недоступен</b>\n\nДля использования бота вы должны ознакомиться и принять Пользовательское соглашение."
+            builder = InlineKeyboardBuilder()
+            builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://amneziawg.fun/terms"))
+            builder.add(InlineKeyboardButton(text="🔐 Политика конфиденциальности", url="https://amneziawg.fun/privacy"))
+            builder.add(InlineKeyboardButton(text="✅ Принять соглашение", callback_data="usr_tos_accept"))
+            builder.adjust(1)
             
             if isinstance(event, Message):
                 await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -110,18 +114,18 @@ main_reply_kb = ReplyKeyboardMarkup(
 
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="🛍 Купить / Продлить VPN", callback_data="usr_buy_choose_srv"))
+    builder.add(InlineKeyboardButton(text="🛍 Оформить / продлить доступ", callback_data="usr_buy_choose_srv"))
     builder.add(InlineKeyboardButton(
-        text="🎁 VPN бесплатно",
+        text="🎁 Бесплатный доступ",
         url=(db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")))
     builder.add(InlineKeyboardButton(text="🔑 Мои конфиги", callback_data="usr_my_configs"))
     builder.add(InlineKeyboardButton(text="👤 Мой профиль", callback_data="usr_profile"))
     builder.add(InlineKeyboardButton(text="📧 Привязать почту", callback_data="usr_link_email"))
-    builder.add(InlineKeyboardButton(text="ℹ️ Описание и условия", callback_data="usr_description"))
     builder.add(InlineKeyboardButton(text="📚 Инструкция по настройке", callback_data="usr_help"))
     builder.add(InlineKeyboardButton(text="🤝 Поддержка", callback_data="usr_support"))
-    builder.add(InlineKeyboardButton(text="📜 Соглашение и Политика", callback_data="usr_tos"))
-    builder.adjust(1, 1, 1, 1, 2, 2)
+    builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://amneziawg.fun/terms"))
+    builder.add(InlineKeyboardButton(text="🔐 Политика конфиденциальности", url="https://amneziawg.fun/privacy"))
+    builder.adjust(1, 1, 1, 1, 2, 1, 1, 1)
     return builder.as_markup()
 
 async def check_and_clean_expired(tg_id: int):
@@ -182,13 +186,17 @@ async def start_cmd(message: Message, state: FSMContext, command: CommandObject)
     if not profile or len(profile) <= 3 or profile[3] == 0:
         text = (
             "👋 <b>Добро пожаловать!</b>\n\n"
-            "Перед началом использования нашего VPN-сервиса, пожалуйста, ознакомьтесь с Пользовательским соглашением и Политикой конфиденциальности."
+            "Перед началом использования сервиса, пожалуйста, ознакомьтесь с Пользовательским соглашением и Политикой конфиденциальности."
         )
-        builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="📜 Открыть соглашение", callback_data="usr_tos"))
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://amneziawg.fun/terms"))
+        builder.add(InlineKeyboardButton(text="🔐 Политика конфиденциальности", url="https://amneziawg.fun/privacy"))
+        builder.add(InlineKeyboardButton(text="✅ Принять соглашение", callback_data="usr_tos_accept"))
+        builder.adjust(1)
         await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         return
 
-    await message.answer("👋 Добро пожаловать! Я бот для заказа ультра-быстрого VPN с защитой от блокировок AmneziaWG.\n\nВыберите интересующий раздел меню:", reply_markup=main_reply_kb)
+    await message.answer("👋 Добро пожаловать! Здесь можно управлять подпиской и конфигурациями сервиса AmneziaWG.\n\nВыберите интересующий раздел меню:", reply_markup=main_reply_kb)
     await message.answer("Навигация:", reply_markup=get_main_keyboard())
 
 @user_router.message(F.text == "🚀 Главное меню")
@@ -289,7 +297,7 @@ async def my_configs(callback: CallbackQuery):
     active_subs = [s for s in subs if s[5] == 1]
 
     if not active_subs:
-        text = "🔑 У вас пока нет активных подписок. Оформите их в разделе «🛍 Купить / Продлить VPN»."
+        text = "🔑 У вас пока нет активных подписок. Оформите их в разделе «🛍 Оформить / продлить доступ»."
         builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
         return await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
@@ -342,7 +350,7 @@ async def mycfg_get(callback: CallbackQuery):
     qr_png = qrgen.make_qr_png(config_text)
     if qr_png:
         await callback.message.answer_photo(
-            BufferedInputFile(qr_png, filename="vpn_qr.png"),
+            BufferedInputFile(qr_png, filename="access_qr.png"),
             caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
         )
     await callback.answer()
@@ -375,29 +383,22 @@ async def show_profile(callback: CallbackQuery):
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
+def _legal_links_keyboard(include_menu: bool = True):
+    builder = InlineKeyboardBuilder()
+    builder.add(InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://amneziawg.fun/terms"))
+    builder.add(InlineKeyboardButton(text="🔐 Политика конфиденциальности", url="https://amneziawg.fun/privacy"))
+    if include_menu:
+        builder.add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 @user_router.callback_query(F.data == "usr_description")
 async def show_description(callback: CallbackQuery):
-    text = (
-        "ℹ️ <b>ОПИСАНИЕ УСЛУГ И УСЛОВИЯ ПОЛЬЗОВАНИЯ</b>\n\n"
-        "🌟 <b>Эксклюзивное качество и скорость:</b>\n"
-        "Мы следим за тем, чтобы на каждом нашем сервере располагалось <b>максимум 20 человек</b>. "
-        "Это гарантирует отсутствие перегрузок, стабильно высокую скорость и минимальный пинг для каждого пользователя. "
-        "Ваш интернет всегда будет «летать»!\n\n"
-        "🛒 <b>Как это работает?</b>\n"
-        "Вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и бот моментально выдает вам личный конфигурационный файл. "
-        "Достаточно добавить его в приложение, нажать одну кнопку — и вы в безопасном интернете без ограничений.\n\n"
-        "📱 <b>Поддерживаемые платформы:</b>\n"
-        "Мы используем современный протокол AmneziaWG (надежная защита от блокировок), который легко настраивается на:\n"
-        "• <b>Android</b> (смартфоны и планшеты)\n"
-        "• <b>iOS</b> (iPhone / iPad)\n"
-        "• <b>Windows</b> (ПК и ноутбуки)\n\n"
-        "👑 <b>Выделенный личный сервер:</b>\n"
-        "Если вы хотите получить максимальную приватность и использовать 100% мощности сервера только для себя — "
-        "у нас есть услуга <b>Личного выделенного сервера</b>. Для заказа обратитесь в Поддержку с просьбой о выделенном сервере, "
-        "и мы настроим его специально для вас."
+    await callback.message.edit_text(
+        "Документы сервиса доступны на сайте:",
+        reply_markup=_legal_links_keyboard(),
     )
-    builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
-    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @user_router.callback_query(F.data == "usr_buy_choose_srv")
 async def select_server(callback: CallbackQuery):
@@ -671,10 +672,10 @@ async def show_help(callback: CallbackQuery):
         "1️⃣ <b>Скачайте приложение AmneziaWG</b> на ваше устройство по ссылкам ниже:\n"
         "📱 <a href='https://play.google.com/store/apps/details?id=org.amnezia.awg'>Скачать для Android (Google Play)</a>\n"
         "🍏 <a href='https://apps.apple.com/us/app/amneziawg/id6478942365'>Скачать для iOS (App Store)</a>\n"
-        "💻 <a href='https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1'>Скачать для Windows (GitHub)</a>\n\n"
+        "💻 Для Windows получите ссылку на приложение через Поддержку.\n\n"
         "2️⃣ <b>Сохраните файл конфигурации</b> <code>.conf</code>, который бот прислал вам после оплаты или оформления пробного периода.\n\n"
         "3️⃣ Откройте приложение <b>AmneziaWG</b>, нажмите кнопку <b>«Добавить туннель»</b> (или знак ➕) и выберите скачанный файл.\n\n"
-        "4️⃣ Включите переключатель. <b>Готово!</b> Теперь вы в безопасном и свободном интернете! 🌍"
+        "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍"
     )
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
@@ -703,37 +704,13 @@ async def process_support_message(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка отправки.")
     await state.clear()
 
-@user_router.callback_query(F.data == "usr_tos")
-async def show_tos(callback: CallbackQuery):
-    text = (
-        "📜 <b>ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ И ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ</b>\n\n"
-        "<b>1. Общие положения</b>\n"
-        "Используя данного бота, вы принимаете условия предоставления услуг VPN. "
-        "Сервис предоставляется «как есть» без гарантий абсолютной бесперебойности.\n\n"
-        "<b>2. Политика конфиденциальности</b>\n"
-        "• Сервис собирает <b>только базовую информацию</b> из вашего профиля (Telegram ID, имя и username) для привязки и управления подпиской.\n"
-        "• Мы <b>НЕ ВЕДЕМ</b> логи вашего трафика, не отслеживаем посещаемые ресурсы и не перехватываем скачиваемые файлы.\n"
-        "• Ваш IP-адрес используется протоколом WireGuard исключительно временно для поддержания активного соединения с сервером.\n\n"
-        "<b>3. Правила использования</b>\n"
-        "• Строго запрещается использование сервиса для любой незаконной деятельности (спам, кардинг, DDoS-атаки, мошенничество и т.д.).\n"
-        "• При поступлении официальных жалоб (Abuse) на вашу активность со стороны дата-центра, мы оставляем за собой право заблокировать вашу учетную запись без возврата средств.\n\n"
-        "<i>Нажимая кнопку ниже, вы подтверждаете свое согласие с данными правилами и условиями.</i>"
+@user_router.callback_query(F.data.in_({"usr_tos", "usr_terms", "usr_privacy"}))
+async def show_legal_links(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "Документы сервиса доступны на сайте:",
+        reply_markup=_legal_links_keyboard(),
     )
-    
-    builder = InlineKeyboardBuilder()
-    
-    profile = db.get_user_profile(callback.from_user.id)
-    accepted = False
-    if profile and len(profile) > 3 and profile[3] == 1:
-        accepted = True
-        
-    if not accepted:
-        builder.add(InlineKeyboardButton(text="✅ Принять соглашение", callback_data="usr_tos_accept"))
-    else:
-        builder.add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
-        
-    builder.adjust(1)
-    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
 
 @user_router.callback_query(F.data == "usr_tos_accept")
 async def accept_tos_cb(callback: CallbackQuery):
@@ -749,7 +726,7 @@ async def accept_tos_cb(callback: CallbackQuery):
     await callback.answer("✅ Вы успешно приняли Пользовательское соглашение!", show_alert=True)
     
     await callback.message.edit_text(
-        "👋 Добро пожаловать! Я бот для заказа ультра-быстрого VPN с защитой от блокировок AmneziaWG.\n\nВыберите интересующий раздел меню:", 
+        "👋 Добро пожаловать! Здесь можно управлять подпиской и конфигурациями сервиса AmneziaWG.\n\nВыберите интересующий раздел меню:",
         reply_markup=get_main_keyboard()
     )
 
@@ -800,7 +777,7 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
         try:
             await bot.send_photo(
                 tg_id,
-                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                BufferedInputFile(qr_png, filename="access_qr.png"),
                 caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
             )
         except Exception as _e:
@@ -880,7 +857,7 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
         try:
             await bot.send_photo(
                 tg_id,
-                BufferedInputFile(qr_png, filename="vpn_qr.png"),
+                BufferedInputFile(qr_png, filename="access_qr.png"),
                 caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код» и наведите камеру на экран."
             )
         except Exception as _e:

@@ -49,12 +49,12 @@ def get_admin_keyboard():
 async def admin_cmd(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    await message.answer("🛠 Панель управления VPN бизнесом:", reply_markup=get_admin_keyboard())
+    await message.answer("🛠 Панель управления сервисом:", reply_markup=get_admin_keyboard())
 
 @admin_router.callback_query(F.data == "adm_menu")
 async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("🛠 Панель управления VPN бизнесом:", reply_markup=get_admin_keyboard())
+    await callback.message.edit_text("🛠 Панель управления сервисом:", reply_markup=get_admin_keyboard())
 
 # --- УПРАВЛЕНИЕ СЕРВЕРАМИ ---
 @admin_router.callback_query(F.data == "adm_servers_menu")
@@ -338,7 +338,7 @@ async def manual_hours_proc(message: Message, state: FSMContext):
     config_file = BufferedInputFile(config_text.encode('utf-8'), filename=f"ID{s_id}AWG.conf")
     
     try:
-        await message.bot.send_document(tg_id, config_file, caption=f"🎁 Администратор выдал вам доступ к VPN на {hours} ч.\nЛокация: {srv_name}")
+        await message.bot.send_document(tg_id, config_file, caption=f"🎁 Администратор выдал вам доступ к сервису на {hours} ч.\nЛокация: {srv_name}")
         await message.answer(f"✅ Конфиг успешно отправлен пользователю {tg_id}.")
     except Exception:
         config_file_admin = BufferedInputFile(config_text.encode('utf-8'), filename=f"ID{s_id}AWG.conf")
@@ -489,7 +489,7 @@ _MAIL_PROMPTS = {
     "mail_smtp_user": "Введите логин SMTP (обычно сам адрес почты)",
     "mail_smtp_password": "Введите пароль SMTP (для Gmail - пароль приложения)",
     "mail_smtp_tls": "Введите тип шифрования: starttls, ssl или none",
-    "mail_from": "Введите адрес отправителя, например:\nAmneziaWG VPN <no-reply@amneziawg.fun>",
+    "mail_from": "Введите адрес отправителя, например:\nСервис AmneziaWG <no-reply@amneziawg.fun>",
     "mail_resend_key": "Введите API-ключ Resend (начинается с re_...), из личного кабинета resend.com",
 }
 
@@ -709,7 +709,7 @@ async def approve_details_request(callback: CallbackQuery):
         await callback.bot.send_message(tg_id, user_text, reply_markup=builder.as_markup(), parse_mode="HTML")
         await callback.message.edit_text(callback.message.text + "\n\n✅ <b>Реквизиты успешно отправлены.</b>", parse_mode="HTML")
     except Exception:
-        await callback.answer("⚠️ Не удалось отправить сообщение пользователю (возможно, он заблокировал бота).", show_alert=True)
+        await callback.answer("⚠️ Не удалось отправить сообщение пользователю (возможно, чат недоступен).", show_alert=True)
 
 @admin_router.callback_query(F.data.startswith("adm_rej_det_"))
 async def reject_details_request(callback: CallbackQuery):

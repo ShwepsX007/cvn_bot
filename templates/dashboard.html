@@ -28,7 +28,7 @@
 <meta property="og:description" content="{{ og_description }}">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:image" content="{{ og_image }}">
-<meta property="og:site_name" content="AmneziaWG VPN">
+<meta property="og:site_name" content="Сервис AmneziaWG">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ og_title }}">
 <meta name="twitter:description" content="{{ og_description }}">
@@ -44,7 +44,9 @@
         </div>
         <div class="d-flex gap-2">
             <a href="/" class="btn btn-outline-light btn-sm rounded-pill px-3">🏠 Главная</a>
-            <a href="/free" class="btn btn-success btn-sm rounded-pill px-3">🎁 Бесплатный VPN</a>
+            <a href="/terms" class="btn btn-outline-light btn-sm rounded-pill px-3">Пользовательское соглашение</a>
+            <a href="/privacy" class="btn btn-outline-light btn-sm rounded-pill px-3">Политика конфиденциальности</a>
+            <a href="/free" class="btn btn-success btn-sm rounded-pill px-3">🎁 Бесплатный доступ</a>
             {% if is_admin %}
             <a href="/admin/web" class="btn btn-warning btn-sm rounded-pill px-3">🛠 Админка</a>
             {% endif %}
@@ -56,23 +58,13 @@
 <div class="container pb-5">
 
 {% if not accepted_tos %}
-    <!-- ===================== ЭКРАН ПРИНЯТИЯ СОГЛАШЕНИЯ ===================== -->
+    <!-- Экран ознакомления с правилами -->
     <div class="card card-custom p-4 p-md-5 mb-4">
-        <h4 class="fw-bold mb-3">📜 Пользовательское соглашение и Политика конфиденциальности</h4>
-        <div class="mb-3">
-            <b>1. Общие положения</b><br>
-            Используя данный сервис, вы принимаете условия предоставления услуг VPN. Сервис предоставляется «как есть» без гарантий абсолютной бесперебойности.
-        </div>
-        <div class="mb-3">
-            <b>2. Политика конфиденциальности</b><br>
-            • Сервис собирает только базовую информацию из вашего профиля Telegram (ID, имя и username) для привязки и управления подпиской.<br>
-            • Мы не ведем логи вашего трафика, не отслеживаем посещаемые ресурсы и не перехватываем скачиваемые файлы.<br>
-            • Ваш IP-адрес используется протоколом WireGuard исключительно для поддержания активного соединения с сервером.
-        </div>
-        <div class="mb-4">
-            <b>3. Правила использования</b><br>
-            • Строго запрещается использование сервиса для любой незаконной деятельности (спам, кардинг, DDoS-атаки, мошенничество и т.д.).<br>
-            • При поступлении официальных жалоб (Abuse) на вашу активность, мы оставляем за собой право заблокировать учетную запись без возврата средств.
+        <h4 class="fw-bold mb-3">📜 Перед продолжением</h4>
+        <p>Ознакомьтесь с документами сервиса. Для использования личного кабинета необходимо принять Пользовательское соглашение.</p>
+        <div class="d-flex gap-2 flex-wrap mb-4">
+            <a class="btn btn-outline-primary rounded-pill" href="/terms" target="_blank" rel="noopener">Пользовательское соглашение</a>
+            <a class="btn btn-outline-primary rounded-pill" href="/privacy" target="_blank" rel="noopener">Политика конфиденциальности</a>
         </div>
         <form method="post" action="/web/accept_tos">
             <button type="submit" class="btn btn-primary btn-lg rounded-pill px-5">✅ Принять соглашение и продолжить</button>
@@ -108,8 +100,10 @@
                 </div>
                 {% if sub.has_config %}
                 <div id="qr-block-{{ sub.server_id }}" class="mt-3" style="display:none">
-                    <img src="/qr/{{ sub.server_id }}" class="qr-img" alt="QR-код конфига" style="max-width:230px">
-                    <div class="small text-muted mt-1">Откройте AmneziaWG на телефоне → «Добавить туннель» → «Сканировать QR-код» и наведите камеру на этот код.</div>
+                    <a href="/qr/{{ sub.server_id }}" target="_blank" rel="noopener" aria-label="Открыть QR-код в полном размере">
+                        <img src="/qr/{{ sub.server_id }}" class="qr-img" alt="QR-код конфигурации" style="display:block;width:100%;max-width:460px;height:auto;image-rendering:pixelated">
+                    </a>
+                    <div class="small text-muted mt-1">Откройте сканер AmneziaWG на телефоне и наведите камеру на QR. Если экран уменьшил изображение, нажмите на него, чтобы открыть полный размер.</div>
                 </div>
                 <pre id="cfg-text-{{ sub.server_id }}" class="cfg-pre small mt-3 p-2" style="display:none; white-space:pre-wrap"></pre>
                 {% endif %}
@@ -146,7 +140,7 @@
 
     <!-- ===================== КУПИТЬ / ПРОДЛИТЬ ===================== -->
     <div class="card card-custom p-4 mb-4">
-        <h5 class="fw-bold mb-3">🛍 Купить / продлить VPN</h5>
+        <h5 class="fw-bold mb-3">🛍 Оформить / продлить доступ</h5>
         {% if servers %}
             {% for srv in servers %}
             <div class="border rounded-4 p-3 mb-3">
@@ -181,11 +175,11 @@
                         <li>Скачайте приложение AmneziaWG:
                             <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" target="_blank">Android</a> ·
                             <a href="https://apps.apple.com/us/app/amneziawg/id6478942365" target="_blank">iOS</a> ·
-                            <a href="https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/2.0.1" target="_blank">Windows</a>
+                            <span>Windows — ссылка через поддержку</span>
                         </li>
                         <li>Скачайте файл конфигурации <code>.conf</code> из раздела «Мои подписки» выше.</li>
                         <li>Откройте приложение AmneziaWG, нажмите «Добавить туннель» (➕) и выберите скачанный файл.</li>
-                        <li>Включите переключатель. Готово — вы в безопасном интернете!</li>
+                        <li>Включите переключатель. Готово — подключение настроено.</li>
                     </ol>
                 </div>
             </div>
@@ -196,9 +190,9 @@
             </h2>
             <div id="accDesc" class="accordion-collapse collapse" data-bs-parent="#infoAccordion">
                 <div class="accordion-body">
-                    <p><b>Эксклюзивное качество и скорость:</b> на каждом сервере не более 20 человек — это гарантирует стабильно высокую скорость и минимальный пинг.</p>
+                    <p>На серверах действует лимит подключений, чтобы распределять доступ между пользователями.</p>
                     <p><b>Как это работает:</b> вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и сервис моментально выдает конфигурационный файл.</p>
-                    <p><b>Поддерживаемые платформы:</b> Android, iOS, Windows — протокол AmneziaWG с защитой от блокировок.</p>
+                    <p><b>Поддерживаемые платформы:</b> Android, iOS и Windows. Для подключения используется приложение AmneziaWG.</p>
                     <p><b>Выделенный личный сервер:</b> для заказа обратитесь в поддержку ниже.</p>
                 </div>
             </div>
@@ -481,7 +475,6 @@ async function sendSupport() {
 }
 </script>
 
-{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
 {% if analytics_html %}{{ analytics_html|safe }}{% endif %}
 </body>
 </html>

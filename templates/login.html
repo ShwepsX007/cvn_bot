@@ -15,7 +15,7 @@
             min-height: 100vh;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             display: flex;
-            align-items: center;
+            flex-direction: column;
         }
         .login-card {
             border: none;
@@ -37,14 +37,14 @@
 <meta property="og:description" content="{{ og_description }}">
 <meta property="og:url" content="{{ canonical_url }}">
 <meta property="og:image" content="{{ og_image }}">
-<meta property="og:site_name" content="AmneziaWG VPN">
+<meta property="og:site_name" content="Сервис AmneziaWG">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{ og_title }}">
 <meta name="twitter:description" content="{{ og_description }}">
 <meta name="twitter:image" content="{{ og_image }}">
 </head>
 <body>
-<div class="container">
+<div class="container auth-main">
     <div class="row justify-content-center">
         <div class="col-md-7 col-lg-5">
             <div class="card login-card p-4 p-md-5 bg-white">
@@ -71,7 +71,7 @@
 
                     <!-- ВХОД ЧЕРЕЗ TELEGRAM -->
                     <div class="tab-pane fade show active text-center" id="pane-tg" role="tabpanel">
-                        <p class="text-muted mb-4">Войдите через Telegram, чтобы купить или продлить VPN, скачать конфигурацию и управлять подпиской.</p>
+                        <p class="text-muted mb-4">Войдите через Telegram, чтобы оформить или продлить доступ, скачать конфигурацию и управлять подпиской.</p>
 
                         {% if bot_username %}
                         <div class="tg-btn-wrap mb-3">
@@ -156,7 +156,10 @@
 
             </div>
             <div class="text-center mt-3">
-                <a href="/terms" class="text-muted small">Условия использования и политика конфиденциальности</a>
+                <div class="d-flex justify-content-center gap-3 flex-wrap">
+                    <a href="/terms" class="text-muted small">Пользовательское соглашение</a>
+                    <a href="/privacy" class="text-muted small">Политика конфиденциальности</a>
+                </div>
             </div>
         </div>
     </div>
@@ -188,7 +191,6 @@
     });
 </script>
 
-{% if site_banner_html %}<div class="container mt-4 mb-2">{{ site_banner_html|safe }}</div>{% endif %}
-{% if analytics_html %}{{ analytics_html|safe }}{% endif %}
+{% if analytics_html %}<div class="auth-analytics">{{ analytics_html|safe }}</div>{% endif %}
 </body>
 </html>

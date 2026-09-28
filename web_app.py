@@ -97,12 +97,12 @@ def _site_globals(request: Request = None) -> dict:
     # Канонический URL (без query)
     canonical = site_url + path
     # OG-описание и заголовок по умолчанию — переопределяются в ручках через context
-    title_suffix = "AmneziaWG VPN — быстрый и свободный интернет"
+    title_suffix = "Сервис AmneziaWG"
     return {
         "site_url": site_url,
         "canonical_url": canonical,
         "og_title": title_suffix,
-        "og_description": "Быстрый VPN с протоколом AmneziaWG: обход блокировок, бесплатный пробный период, серверы в России и мире, оплата картой и вручную.",
+        "og_description": "Сервис AmneziaWG: управление подпиской, пробный период и оплата онлайн.",
         "og_image": f"{site_url}/static/apple-touch-icon.png",
         "page_title": title_suffix,
         "site_banner_html": bot_db.get_setting("site_banner_html") or "",
@@ -167,7 +167,7 @@ async def delete_amnezia_peer(ip: str, port: int, peer_id: str):
         raise Exception(f"Ошибка SSH при удалении: {result}")
     print(f"[CLEANUP] Успешно удален {peer_id} на сервере {ip}")
 
-# === БЕСПЛАТНЫЙ VPN НА САЙТЕ (/free): истечение + напоминания в TG ===
+# === БЕСПЛАТНЫЙ ДОСТУП НА САЙТЕ (/free): истечение + напоминания в TG ===
 async def check_expired_free_accesses():
     """Каждые 5 минут: выключаем на нодах истекшие бесплатные конфиги (страница /free)."""
     try:
@@ -197,7 +197,7 @@ async def free_reminders_job():
             try:
                 await bot.send_message(
                     tg_id,
-                    "🎁 <b>Ваш бесплатный VPN скоро выключится!</b>\n\n"
+                    "🎁 <b>Ваш бесплатный доступ скоро завершится!</b>\n\n"
                     f"Сервер <b>{srv_name}</b>, окончание: {expires_at} (UTC). "
                     "Продлить можно заблаговременно и сколько угодно раз - через 2 шага на сайте:\n\n"
                     f"1) Откройте: {site_url}/free\n"
@@ -273,17 +273,20 @@ async def shutdown_event():
 
 @app.get("/")
 async def read_root(request: Request):
-    active_servers = bot_db.get_active_servers() or []
+    # Главная показывает только узлы, выделенные именно для бесплатной выдачи (/free),
+    # а не остаток мест на платных серверах.
+    active_servers = bot_db.get_active_free_servers() or []
     servers = []
 
     for s_id, ip, port, name, limit in active_servers:
-        paid_count = bot_db.count_paid_users_on_server(s_id) or 0
-        free_slots = limit - paid_count
+        free_users = bot_db.free_count_active_on_server(s_id) or 0
+        capacity = max(int(limit or 0), 0)
+        free_slots = max(capacity - int(free_users), 0)
         servers.append({
-            "id": s_id, "name": name, "free_slots": free_slots if free_slots > 0 else 0
+            "id": s_id, "name": name, "free_slots": free_slots
         })
 
-    # Получаем username бота для жёсткой ссылки в обход get_me() на случай Unauthorized.
+    # Получаем username бота для резервной ссылки вместо get_me() на случай Unauthorized.
     bot_username = None
     try:
         if BOT_USERNAME:
@@ -302,9 +305,9 @@ async def read_root(request: Request):
             "request": request,
             "servers": servers,
             "tg_bot_url": tg_bot_url,
-            "page_title": "AmneziaWG VPN — быстрый и свободный интернет без блокировок",
-            "og_title": "AmneziaWG VPN — быстрый и свободный интернет",
-            "og_description": "Обходите любые блокировки на высокой скорости с AmneziaWG. Пробный период 24 часа, бесплатный VPN на сайте, оплата картой или вручную. Серверы в России и Европе.",
+            "page_title": "Сервис AmneziaWG",
+            "og_title": "Сервис AmneziaWG",
+            "og_description": "Управление доступом, пробный период и оплата онлайн.",
         }
     )
 
@@ -399,12 +402,17 @@ def _check_captcha(captcha_id: str, captcha_answer: str) -> bool:
 
 @app.get("/terms")
 async def terms_page(request: Request):
-    """Публичная страница пользовательского соглашения / политики / cookies."""
+    """Публичная страница пользовательского соглашения."""
     return templates.TemplateResponse(request=request, name="terms.html", context={"request": request})
 
+@app.get("/privacy")
+async def privacy_page(request: Request):
+    """Публичная страница политики конфиденциальности."""
+    return templates.TemplateResponse(request=request, name="privacy.html", context={"request": request})
 
-# ==================== БЕСПЛАТНЫЙ VPN НА САЙТЕ ====================
-# Поток (строго в этом порядке): /free (инструкция+условия+реклама)
+
+# ==================== БЕСПЛАТНЫЙ ДОСТУП НА САЙТЕ ====================
+# Поток (строго в этом порядке): /free (инструкция и условия)
 #   -> /free/config (выбор сервера + капча -> «Получить» либо «Продлить»)
 # Конфиг живет free_hours; продление - только с этой же страницы; истекает и забыли - удаляется.
 
@@ -436,7 +444,8 @@ async def free_config_page(request: Request):
         return templates.TemplateResponse(request=request, name="free_config.html", context={
             "request": request, "mode": "active", "msg": request.query_params.get("msg"),
             "error": request.query_params.get("error"), "srv_name": srv_name,
-            "expires_at": exp, "token": token, "server_id": server_id, "free_hours": hours,
+            "expires_at": exp, "token": token, "server_id": server_id,
+            "access_id": acc_id, "free_hours": hours,
         })
 
     # активной записи нет -> предлагаем выбор свободного бесплатного сервера
@@ -510,7 +519,7 @@ async def free_download(token: str):
     return Response(
         content=config_text,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename=FREE_{access_id}.conf"}
+        headers={"Content-Disposition": f"attachment; filename=free{access_id}.conf"}
     )
 
 @app.get("/free/qr/{token}")
@@ -579,7 +588,7 @@ async def auth_telegram(request: Request):
 @app.get("/auth/bot")
 async def auth_bot(request: Request):
     """Вход в кабинет по одноразовой ссылке, которую выдает бот (/start web_login).
-    Замена Telegram-виджету: работает даже там, где виджет заблокирован."""
+    Замена Telegram-виджету: работает, если виджет не отображается."""
     token = str(request.query_params.get("token") or "")
     tg_id = await asyncio.to_thread(bot_db.consume_tg_login_token, token) if token else None
     if not tg_id:
@@ -1217,7 +1226,7 @@ async def download_config(request: Request, server_id: int):
         raise HTTPException(status_code=404, detail="Конфигурация еще не сохранена на сервере. Попробуйте продлить/переоформить доступ.")
 
     # Имя файла для скачивания отдельно от служебного идентификатора пира (uname/sub[2]) -
-    # тот трогать нельзя, он используется на VPN-сервере через SSH-скрипты.
+    # тот трогать нельзя, он используется на сервере сервиса через SSH-скрипты.
     # Требование клиентских приложений: без пробелов/скобок/подчеркиваний, короткое имя.
     return Response(
         content=config_text,

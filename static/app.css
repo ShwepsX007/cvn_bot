@@ -1,5 +1,5 @@
 /* =====================================================================
-   AmneziaWG VPN — Octo-style dark SaaS dashboard theme
+   Сервис AmneziaWG — Octo-style dark SaaS dashboard theme
    Вдохновлён стилем octoclick: тёмно-синий уголь, округлые карточки 14px,
    тонкие полупрозрачные границы, синий акцент #2D7BFF, системный шрифт.
    Переопределяет Bootstrap на уровне CSS-переменных, чтобы все компоненты
@@ -408,3 +408,89 @@ pre {
 }
 .dropdown-item { color: var(--oc-text); }
 .dropdown-item:hover { background: rgba(255,255,255,.05); color: var(--oc-text); }
+
+/* Authentication pages: keep the form centered and the analytics badge at the viewport bottom. */
+.auth-main {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.auth-main > .row { width: 100%; }
+.auth-footer { flex: 0 0 auto; }
+.auth-analytics {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 36px;
+  margin-top: auto;
+  padding: .25rem .75rem;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.auth-analytics img { display: block; max-width: 100%; height: auto; }
+
+@media (max-width: 575.98px) {
+  .auth-main { padding-left: .5rem; padding-right: .5rem; }
+  .auth-main > .row { margin-left: 0; margin-right: 0; }
+  .auth-main > .row > [class*="col-"] { padding-left: .35rem; padding-right: .35rem; }
+  .auth-main .login-card { padding: 1.25rem !important; border-radius: 18px !important; }
+  .auth-main .btn:not(.btn-link) {
+    min-height: 44px;
+    height: auto;
+    padding: .6rem .9rem;
+    border-radius: 12px !important;
+    font-size: .95rem;
+    line-height: 1.25;
+    white-space: normal;
+  }
+  .auth-main .btn-link { white-space: normal; }
+  .auth-main .tg-btn-wrap { width: 100%; max-width: 100%; overflow: hidden; }
+  .auth-footer {
+    gap: .5rem !important;
+    padding-top: .75rem !important;
+    padding-bottom: .75rem !important;
+    text-align: center;
+  }
+  .auth-footer a { font-size: .78rem; }
+}
+
+/* Site-wide finishing layer: keep every route on the homepage design system. */
+html, body {
+  background: var(--oc-bg) !important;
+  color: var(--oc-text) !important;
+}
+body {
+  font-family: var(--bs-body-font-family) !important;
+  font-size: var(--bs-body-font-size);
+  line-height: var(--bs-body-line-height);
+}
+
+.topbar {
+  background: var(--oc-bg-2) !important;
+  color: var(--oc-text) !important;
+  border-bottom: 1px solid var(--oc-border) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 14px 0 !important;
+  margin-bottom: 24px !important;
+}
+.topbar .container > .d-flex { flex-wrap: wrap; }
+
+.btn, .btn.rounded-pill {
+  max-width: 100%;
+  font-family: var(--bs-body-font-family) !important;
+  font-weight: 500;
+  border-radius: 9px !important;
+}
+.btn-sm { font-size: .82rem; }
+.btn-lg { font-size: .98rem; }
+.nav-pills .nav-link.rounded-pill { border-radius: 9px !important; }
+
+@media (max-width: 575.98px) {
+  .topbar .container { align-items: flex-start !important; }
+  .topbar .container > .d-flex,
+  .topbar .container > nav { width: 100%; gap: .5rem !important; }
+  .topbar .btn { white-space: normal; line-height: 1.25; }
+  .hero-section { padding: 42px 0 !important; }
+}

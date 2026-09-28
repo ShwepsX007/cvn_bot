@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Тесты бесплатного VPN на сайте (/free → /free/config → продление/скачивание/QR).
+Тесты бесплатного доступа на сайте (/free → /free/config → продление/скачивание/QR).
 Тяжелые побочки (SSH на нодах, Telegram-бот) подменяются фейками.
 Запуск: .testenv/bin/python -m pytest tests/test_free_pages.py -q
 """
@@ -150,7 +150,56 @@ def test_db_slots_and_expired():
 def test_free_page_renders(client):
     r = client.get("/free")
     assert r.status_code == 200
-    assert "Бесплатный VPN" in r.text
+    assert "Бесплатный доступ" in r.text
+
+
+def test_homepage_shows_free_servers_and_free_capacity_only(client):
+    free_sid = add_free_server(name="🎁 FREE", max_users=4)
+    bot_db.add_server("10.0.0.2", "💳 PLAT", 2222)
+    conn = bot_db.get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM servers WHERE ip='10.0.0.2'")
+    paid_sid = cur.fetchone()[0]
+    conn.close()
+    bot_db.set_server_limit(paid_sid, 29)
+
+    bot_db.free_create_access(
+        "203.0.113.5", free_sid, "peer_free", FAKE_CFG, live_expires()
+    )
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Бесплатных серверов" in response.text
+    assert "🎁 FREE" in response.text
+    assert "Свободных мест: <b style=\"color:var(--oc-text);\">3</b>" in response.text
+    assert '<div class="value">3</div>' in response.text
+    assert "💳 PLAT" not in response.text
+
+
+def test_homepage_shows_empty_state_when_no_free_servers(client):
+    bot_db.add_server("10.0.0.2", "💳 PLAT", 2222)
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Бесплатных серверов сейчас нет." in response.text
+    assert "💳 PLAT" not in response.text
+
+
+def test_legal_documents_are_separate_and_public(client):
+    terms = client.get("/terms")
+    privacy = client.get("/privacy")
+    home = client.get("/")
+
+    assert terms.status_code == privacy.status_code == home.status_code == 200
+    assert '<h1 class="h3 fw-bold mb-4">Пользовательское соглашение</h1>' in terms.text
+    assert '<h1 class="h3 fw-bold mb-4">Политика конфиденциальности</h1>' in privacy.text
+    assert 'href="/terms"' in home.text
+    assert 'href="/privacy"' in home.text
+
+    public_pages = home.text + client.get("/free").text + terms.text + privacy.text
+    assert "VPN" not in public_pages.upper()
+    assert "Блокиров" not in public_pages
+    assert "Обход" not in public_pages
 
 
 def test_config_page_grant_mode_with_server(client):
@@ -159,6 +208,41 @@ def test_config_page_grant_mode_with_server(client):
     assert r.status_code == 200
     assert "Тест FREE" in r.text          # сервер предлагается
     assert "Получить конфиг" in r.text
+
+
+def test_free_qr_uses_saved_config_unchanged(client, monkeypatch):
+    sid = add_free_server()
+    token = "qr-test-token"
+    bot_db.free_create_access(
+        "9.8.7.6", sid, "peer_qr", FAKE_CFG, live_expires(), download_token=token
+    )
+    encoded_text = []
+
+    def fake_make_qr_png(text):
+        encoded_text.append(text)
+        return b"test-png"
+
+    monkeypatch.setattr(web_app.qrgen, "make_qr_png", fake_make_qr_png)
+    response = client.get(f"/free/qr/{token}")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == b"test-png"
+    assert encoded_text == [FAKE_CFG]
+
+
+def test_active_free_qr_is_large_and_can_be_opened_full_size(client):
+    sid = add_free_server()
+    token = "qr-display-token"
+    bot_db.free_create_access(
+        "testclient", sid, "peer_qr", FAKE_CFG, live_expires(), download_token=token
+    )
+
+    response = client.get("/free/config")
+
+    assert response.status_code == 200
+    assert 'max-width:460px' in response.text
+    assert f'href="/free/qr/{token}" target="_blank"' in response.text
 
 
 def test_grant_flow_and_renew(client):
@@ -198,6 +282,7 @@ def test_grant_flow_and_renew(client):
     r3 = client.get(f"/free/download/{tok}")
     assert r3.status_code == 200
     assert r3.content.decode() == FAKE_CFG
+    assert f"filename=free{acc_id}.conf" in r3.headers["content-disposition"]
 
     # QR работает
     r4 = client.get(f"/free/qr/{tok}")
