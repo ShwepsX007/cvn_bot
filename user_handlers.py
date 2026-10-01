@@ -259,7 +259,11 @@ async def link_email_process(message: Message, state: FSMContext):
         )
 
     acc = db.get_email_account(email)
-    if acc and acc[3] and acc[3] != tg_id:
+    # Почта, зарегистрированная на сайте самостоятельно (без Telegram, виртуальный
+    # внутренний ID), к привязке допускается: после перехода по ссылке из письма
+    # такой аккаунт объединится с этим Telegram в один. Запрещаем только почту,
+    # уже привязанную к ДРУГОМУ реальному Telegram.
+    if acc and acc[3] and not db.is_virtual_tg_id(acc[3]) and acc[3] != tg_id:
         await state.clear()
         return await message.answer(
             "⚠️ Эта почта уже привязана к другому Telegram-аккаунту. Если это вы — "
@@ -284,7 +288,9 @@ async def link_email_process(message: Message, state: FSMContext):
     await message.answer(
         f"✅ Письмо отправлено на <b>{html.quote(email)}</b>!\n\n"
         "Перейдите по ссылке из письма (действует 2 часа) — почта привяжется к аккаунту. "
-        "Сразу после этого сайт предложит задать пароль для входа в кабинет.",
+        "Сразу после этого сайт предложит задать пароль для входа в кабинет.\n\n"
+        "Если по этой почте уже был создан отдельный аккаунт на сайте (без Telegram) — "
+        "после перехода по ссылке он объединится с этим аккаунтом: подписки и заказы не потеряются.",
         parse_mode="HTML",
         reply_markup=get_main_keyboard()
     )

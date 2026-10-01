@@ -184,9 +184,13 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
-    # === УЧЕТНЫЕ ЗАПИСИ ПО ПОЧТЕ (регистрация/вход на сайте без Telegram) ===
-    # tg_id заполняется при привязке (через бота, виджет входа или ссылку-привязку);
-    # одна почта может иметь tg_id, один tg может иметь несколько почт - это не запрещаем.
+    # === УЧЕТНЫЕ ЗАПИСИ ПО ПОЧТЕ (независимая регистрация/вход на сайте) ===
+    # Почтовая регистрация ПОЛНОСТЬЮ САМОСТОЯТЕЛЬНА: пользователю без Telegram
+    # выдается внутренний "виртуальный" ID (см. VIRTUAL_TG_BASE ниже), и он может
+    # пользоваться кабинетом и покупать конфиги без телеграм-бота.
+    # При привязке Telegram (виджет, ссылка из письма, вход через бота) виртуальный
+    # аккаунт объединяется с реальным: данные переносятся на настоящий tg_id
+    # (функция merge_virtual_into_real). Один tg может иметь несколько почт.
     cursor.execute('''CREATE TABLE IF NOT EXISTS email_accounts (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         email TEXT UNIQUE NOT NULL,
@@ -502,6 +506,142 @@ def bind_email_to_tg(email, tg_id):
     cursor.execute("UPDATE email_accounts SET tg_id=? WHERE email=?", (tg_id, email))
     conn.commit()
     conn.close()
+
+
+# --- ВИРТУАЛЬНЫЕ (ПОЧТОВЫЕ) АККАУНТЫ ---
+# Пользователь, зарегистрировавшийся только по почте, получает внутренний
+# "виртуальный" ID: VIRTUAL_TG_BASE + id записи в email_accounts. Вся система
+# (подписки, заказы, конфиги, кабинет) работает с этим ID как с обычным tg_id.
+# Реальные Telegram-ID пользователей всегда много меньше VIRTUAL_TG_BASE
+# (они сейчас порядка 10^9), поэтому пересечение с реальным tg_id исключено.
+# Как только человек привязывает Telegram, виртуальный аккаунт "схлопывается"
+# в реальный - см. merge_virtual_into_real.
+VIRTUAL_TG_BASE = 10 ** 15
+
+def make_virtual_tg_id(email_account_id):
+    return VIRTUAL_TG_BASE + int(email_account_id)
+
+def is_virtual_tg_id(tg_id):
+    """True, если это внутренний ID почтового аккаунта без Telegram."""
+    try:
+        tg = int(tg_id)
+    except (TypeError, ValueError):
+        return False
+    return VIRTUAL_TG_BASE <= tg < 2 * VIRTUAL_TG_BASE
+
+def email_account_id_from_virtual(tg_id):
+    """id записи в email_accounts из виртуального ID (или None)."""
+    if not is_virtual_tg_id(tg_id):
+        return None
+    return int(tg_id) - VIRTUAL_TG_BASE
+
+def get_email_account_by_id(acc_id):
+    """Ряд (id, email, password_hash, tg_id, verified) по id записи или None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, email, password_hash, tg_id, verified FROM email_accounts WHERE id=?", (acc_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def get_email_account_by_virtual_tg(tg_id):
+    """Почтовый аккаунт по его виртуальному ID (или None)."""
+    acc_id = email_account_id_from_virtual(tg_id)
+    if acc_id is None:
+        return None
+    return get_email_account_by_id(acc_id)
+
+def ensure_email_account_tg(email):
+    """Возвращает внутренний ID почтового аккаунта: реальный tg_id, если Telegram
+    уже привязан, иначе виртуальный (создает его при необходимости). Если такой
+    почты нет - None. Благодаря этому кабинет и покупки работают без Telegram."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, tg_id FROM email_accounts WHERE email=?", (email,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+    acc_id, tg_id = row
+    if tg_id:
+        conn.close()
+        return tg_id
+    virtual = make_virtual_tg_id(acc_id)
+    # WHERE tg_id IS NULL - защита от гонки двух одновременных запросов
+    cursor.execute("UPDATE email_accounts SET tg_id=? WHERE id=? AND tg_id IS NULL", (virtual, acc_id))
+    conn.commit()
+    conn.close()
+    return virtual
+
+def merge_virtual_into_real(virtual_tg, real_tg):
+    """Объединяет самостоятельный почтовый аккаунт с реальным Telegram-аккаунтом:
+    подписки, заказы, заявки и почта переносятся на настоящий tg_id - система
+    понимает, что это один и тот же человек, и дальше ведет один аккаунт.
+    Возвращает True, если перенос состоялся.
+
+    Подписки на один и тот же сервер не дублируются: если у обоих аккаунтов есть
+    подписка на один сервер, у целевого остается более поздний срок действия."""
+    if not is_virtual_tg_id(virtual_tg):
+        return False
+    try:
+        real_tg = int(real_tg)
+    except (TypeError, ValueError):
+        return False
+    if is_virtual_tg_id(real_tg):
+        return False
+
+    def _parse(d):
+        try:
+            if d and "." in d:
+                return datetime.strptime(d, "%Y-%m-%d %H:%M:%S.%f")
+            if d:
+                return datetime.strptime(d, "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            pass
+        return None
+
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT server_id, username, expire_date, active, is_trial, config_text FROM users WHERE tg_id=?",
+            (virtual_tg,))
+        for s_id, uname, exp, active, is_trial, cfg in cursor.fetchall():
+            cursor.execute(
+                "SELECT expire_date, config_text FROM users WHERE tg_id=? AND server_id=?",
+                (real_tg, s_id))
+            existing = cursor.fetchone()
+            if existing is None:
+                cursor.execute("UPDATE users SET tg_id=? WHERE tg_id=? AND server_id=?",
+                               (real_tg, virtual_tg, s_id))
+                continue
+            v_exp, r_exp = _parse(exp), _parse(existing[0])
+            if v_exp and (r_exp is None or v_exp > r_exp):
+                # Более поздняя подписка почтового аккаунта побеждает; конфиг берем
+                # любой сохраненный (у целевого аккаунта его могло не быть).
+                cursor.execute(
+                    "UPDATE users SET expire_date=?, username=?, active=?, is_trial=?, "
+                    "config_text=COALESCE(?, config_text) WHERE tg_id=? AND server_id=?",
+                    (exp, uname, active, is_trial, cfg, real_tg, s_id))
+            cursor.execute("DELETE FROM users WHERE tg_id=? AND server_id=?", (virtual_tg, s_id))
+
+        for table in ("orders", "manual_orders", "detail_requests", "free_accesses"):
+            cursor.execute(f"UPDATE {table} SET tg_id=? WHERE tg_id=?", (real_tg, virtual_tg))
+
+        # Профиль: у реального Telegram-пользователя обычно уже есть свой профиль -
+        # его и оставляем. Если нет (например, аккаунт создан только что) - переносим
+        # профиль почтового аккаунта, чтобы не потерять принятое соглашение (accepted_tos).
+        cursor.execute("SELECT 1 FROM user_profiles WHERE tg_id=?", (real_tg,))
+        if cursor.fetchone():
+            cursor.execute("DELETE FROM user_profiles WHERE tg_id=?", (virtual_tg,))
+        else:
+            cursor.execute("UPDATE user_profiles SET tg_id=? WHERE tg_id=?", (real_tg, virtual_tg))
+        # Почта теперь указывает на реальный аккаунт (в т.ч. все письма этой учетки).
+        cursor.execute("UPDATE email_accounts SET tg_id=? WHERE tg_id=?", (real_tg, virtual_tg))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
 
 def create_email_token(email, kind, tg_id, ttl_seconds):
     import secrets as _secrets
@@ -1070,6 +1210,8 @@ def get_user_profile(tg_id):
 def accept_tos(tg_id):
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("UPDATE user_profiles SET accepted_tos=1 WHERE tg_id=?", (tg_id,))
+    # Upsert: у почтовых аккаунтов без Telegram строки профиля может еще не быть.
+    cursor.execute('''INSERT INTO user_profiles (tg_id, accepted_tos) VALUES (?, 1)
+                      ON CONFLICT(tg_id) DO UPDATE SET accepted_tos=1''', (tg_id,))
     conn.commit()
     conn.close()

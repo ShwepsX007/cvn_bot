@@ -377,6 +377,9 @@ async def send_broadcast(message: Message, state: FSMContext):
     count = 0
     await message.answer("⏳ Начинаю рассылку...")
     for uid in users:
+        if db.is_virtual_tg_id(uid):
+            # Почтовые аккаунты без Telegram: доставлять некуда, пропускаем.
+            continue
         try:
             await message.bot.send_message(uid, f"📢 <b>Объявление:</b>\n\n{message.text}", parse_mode="HTML")
             count += 1

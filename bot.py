@@ -36,9 +36,15 @@ dp.include_router(admin_router)
 dp.include_router(user_router)
 
 # --- ПРЕДУПРЕЖДЕНИЯ ОБ ОКОНЧАНИИ ---
+# Почтовым аккаунтам без Telegram (виртуальный внутренний ID) напоминания в TG
+# доставить некуда - помечаем их уведомленными сразу, чтобы не долбить API зря.
+
 async def check_expiring_soon():
     users = db.get_expiring_soon_users()
     for tg_id, server_id, username in users:
+        if db.is_virtual_tg_id(tg_id):
+            db.mark_notified_3h(tg_id, server_id)
+            continue
         server = db.get_server_by_id(server_id)
         srv_name = server[2] if server else f"ID {server_id}"
         try:
@@ -54,6 +60,9 @@ async def check_expiring_soon():
 async def check_expiring_1d():
     users = db.get_expiring_soon_users_1d()
     for tg_id, server_id, username in users:
+        if db.is_virtual_tg_id(tg_id):
+            db.mark_notified_1d(tg_id, server_id)
+            continue
         server = db.get_server_by_id(server_id)
         srv_name = server[2] if server else f"ID {server_id}"
         try:
@@ -69,6 +78,9 @@ async def check_expiring_1d():
 async def check_expiring_3d():
     users = db.get_expiring_soon_users_3d()
     for tg_id, server_id, username in users:
+        if db.is_virtual_tg_id(tg_id):
+            db.mark_notified_3d(tg_id, server_id)
+            continue
         server = db.get_server_by_id(server_id)
         srv_name = server[2] if server else f"ID {server_id}"
         try:
@@ -93,12 +105,18 @@ async def check_expired_users():
             
             if "Ошибка" not in result:
                 db.deactivate_user(tg_id, server_id)
+                if not db.is_virtual_tg_id(tg_id):
+                    try:
+                        await bot.send_message(tg_id, f"⚠️ Срок действия вашей подписки на сервис (Сервер: <b>{srv_name}</b>) завершен. Конфигурация отключена.", parse_mode="HTML")
+                    except Exception as _e:
+                        print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
                 try:
-                    await bot.send_message(tg_id, f"⚠️ Срок действия вашей подписки на сервис (Сервер: <b>{srv_name}</b>) завершен. Конфигурация отключена.", parse_mode="HTML")
-                except Exception as _e:
-                    print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
-                try:
-                    await bot.send_message(ADMIN_ID, f"🔴 <b>Подписка истекла!</b>\nПользователь <code>{tg_id}</code> был отключен от сервера {srv_name}.", parse_mode="HTML")
+                    who = f"<code>{tg_id}</code>"
+                    if db.is_virtual_tg_id(tg_id):
+                        _acc = db.get_email_account_by_virtual_tg(tg_id)
+                        who = f"📧 {_acc[1]}" if _acc else who
+                        who += " (почтовый аккаунт, без Telegram)"
+                    await bot.send_message(ADMIN_ID, f"🔴 <b>Подписка истекла!</b>\nПользователь {who} был отключен от сервера {srv_name}.", parse_mode="HTML")
                 except Exception as _e:
                     print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
             else:

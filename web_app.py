@@ -192,6 +192,11 @@ async def free_reminders_job():
             return
         site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
         for access_id, tg_id, server_id, expires_at in due:
+            if bot_db.is_virtual_tg_id(tg_id):
+                # Почтовый аккаунт без Telegram: напоминать в TG некуда - просто
+                # помечаем, чтобы не пытаться на каждом прогоне джоба.
+                bot_db.free_mark_notified(access_id)
+                continue
             srv = bot_db.get_server_by_id(server_id)
             srv_name = srv[2] if srv else f"Сервер {server_id}"
             try:
@@ -238,8 +243,10 @@ async def startup_event():
 
     # Ежедневное автообновление AWG-контейнеров в 05:05 (внутри сама проверяет настройку container_autoupdate)
     scheduler.add_job(autoupdate_node_containers, 'cron', hour=5, minute=5)
-    
-    scheduler.start()
+
+    # Защита от повторного старта (например, несколько поднятий приложения в тестах)
+    if not scheduler.running:
+        scheduler.start()
     
     _polling_task = asyncio.create_task(dp.start_polling(bot))
     print("🚀 WebApp, Telegram-бот и Планировщик успешно запущены вместе!")
@@ -316,6 +323,79 @@ def _current_tg_id(request: Request):
 
 def _current_email(request: Request):
     return request.session.get("email")
+
+def _enter_email_session(request: Request, email: str):
+    """Прописывает почтовый аккаунт в сессию сайта. Если Telegram к аккаунту еще
+    не привязан, аккаунт получает внутренний виртуальный ID - личный кабинет и
+    покупка конфигов работают вообще без Telegram (независимая почтовая учетка)."""
+    tg_id = bot_db.ensure_email_account_tg(email)
+    request.session["email"] = email
+    if tg_id:
+        request.session["tg_id"] = tg_id
+    if tg_id and bot_db.is_virtual_tg_id(tg_id):
+        request.session["display_name"] = email
+        try:
+            if not bot_db.get_user_profile(tg_id):
+                bot_db.update_user_profile(tg_id, email, None)
+        except Exception as e:
+            print(f"Ошибка создания профиля почтового аккаунта {email}: {e}")
+    return tg_id
+
+def _bind_session_email_to_tg(request: Request, tg_id: int):
+    """Вход через Telegram при живой почтовой сессии: система видит, что почта и
+    этот Telegram принадлежат одному человеку, и объединяет их в один аккаунт.
+    Если почта была самостоятельной учеткой без Telegram (виртуальный ID) - все
+    её подписки/заказы переносятся на реальный tg_id."""
+    email = _current_email(request)
+    if not email:
+        return
+    try:
+        acc = bot_db.get_email_account(email)
+        if not acc:
+            return
+        bound = acc[3]
+        if bot_db.is_virtual_tg_id(bound):
+            if bot_db.merge_virtual_into_real(bound, tg_id):
+                print(f"MERGE: почтовый аккаунт {email} объединен с tg {tg_id}")
+        elif not bound or bound == tg_id:
+            bot_db.bind_email_to_tg(email, tg_id)
+        # Почта уже привязана к ДРУГОМУ реальному Telegram - не трогаем,
+        # чтобы не захватить чужой аккаунт.
+    except Exception as e:
+        print(f"Ошибка привязки почты {email} к tg {tg_id}: {e}")
+
+def _admin_identity_note(request: Request, tg_id) -> str:
+    """Строка для уведомлений админу: почта клиента (если известна) и пометка для
+    аккаунтов без Telegram (ответ через бота до них не дойдет - только почта/сайт)."""
+    email = None
+    try:
+        if request is not None:
+            email = _current_email(request)
+        if not email and tg_id:
+            if bot_db.is_virtual_tg_id(tg_id):
+                acc = bot_db.get_email_account_by_virtual_tg(tg_id)
+            else:
+                acc = bot_db.get_email_account_by_tg(tg_id)
+            email = acc[1] if acc else None
+    except Exception:
+        email = None
+    lines = []
+    if email:
+        lines.append(f"📧 Почта: <b>{email}</b>")
+    if bot_db.is_virtual_tg_id(tg_id):
+        lines.append("⚠️ Клиент без Telegram (вход по почте): ответ через бота не дойдет, конфиги он скачивает на сайте.")
+    return "\n".join(lines)
+
+def _download_filename(tg_id) -> str:
+    """Имя скачиваемого .conf: для обычных аккаунтов по ID, для почтовых -
+    по логину-почте (гигантский внутренний ID в имени файла не нужен)."""
+    if bot_db.is_virtual_tg_id(tg_id):
+        acc = bot_db.get_email_account_by_virtual_tg(tg_id)
+        local = (acc[1].split("@")[0] if acc and acc[1] else "email")
+        import re as _re_local
+        local = _re_local.sub(r"[^A-Za-z0-9._-]+", "_", local)[:32].strip("._") or "email"
+        return f"{local}_AWG.conf"
+    return f"{tg_id}AWG.conf"
 
 def is_web_admin(tg_id) -> bool:
     """Признак прав на веб-админку: главный админ из config или назначенный в базе."""
@@ -573,15 +653,9 @@ async def auth_telegram(request: Request):
     request.session["tg_id"] = tg_id
     request.session["display_name"] = full_name
 
-    # Если до этого входили по почте - довязываем email к этому Telegram-аккаунту
-    email = _current_email(request)
-    if email:
-        try:
-            acc = bot_db.get_email_account(email)
-            if acc and (not acc[3] or acc[3] == tg_id):
-                bot_db.bind_email_to_tg(email, tg_id)
-        except Exception as e:
-            print(f"Ошибка привязки почты {email} к tg {tg_id}: {e}")
+    # Если до этого входили по почте - это тот же человек: привязываем почту к этому
+    # Telegram-аккаунту (а самостоятельную почтовую учетку объединяем с ним целиком).
+    _bind_session_email_to_tg(request, tg_id)
 
     return RedirectResponse(url="/dashboard")
 
@@ -602,15 +676,8 @@ async def auth_bot(request: Request):
     request.session["tg_id"] = tg_id
     request.session["display_name"] = full_name
 
-    # Если до этого входили по почте - довязываем email к этому Telegram-аккаунту
-    email = _current_email(request)
-    if email:
-        try:
-            acc = bot_db.get_email_account(email)
-            if acc and (not acc[3] or acc[3] == tg_id):
-                bot_db.bind_email_to_tg(email, tg_id)
-        except Exception as e:
-            print(f"Ошибка привязки почты {email} к tg {tg_id}: {e}")
+    # Если до этого входили по почте - это тот же человек: привязываем/объединяем.
+    _bind_session_email_to_tg(request, tg_id)
 
     return RedirectResponse(url="/dashboard", status_code=303)
 
@@ -647,21 +714,27 @@ async def register_email(request: Request):
     if acc and acc[4]:
         return RedirectResponse(url="/login?tab=email&error=" + quote("Эта почта уже зарегистрирована. Просто войдите."), status_code=303)
 
+    # Если регистрация происходит из уже залогиненного Telegram-аккаунта - сразу
+    # вяжем почту к нему (иначе аккаунт станет самостоятельным почтовым).
+    sess_tg = _current_tg_id(request)
+    if sess_tg and bot_db.is_virtual_tg_id(sess_tg):
+        sess_tg = None
+
     password_hash = emailauth.hash_password(password)
     if acc:
         # Перерегистрация неподтвержденного адреса - обновляем пароль и шлем письмо снова
         bot_db.set_email_password(email, password_hash)
     else:
-        if bot_db.create_email_account(email, password_hash=password_hash) is None:
+        if bot_db.create_email_account(email, password_hash=password_hash, tg_id=sess_tg) is None:
             return RedirectResponse(url="/login?tab=email&error=" + quote("Эта почта уже занята."), status_code=303)
 
-    token = bot_db.create_email_token(email, "verify", None, 24 * 3600)
+    token = bot_db.create_email_token(email, "verify", sess_tg, 24 * 3600)
     ok, _err = await asyncio.to_thread(
         mailer.send_token_mail, "verify", email, token
     )
     print(f"MAIL register verify -> {email}: ok={ok} err={_err}")
     if not ok:
-        return RedirectResponse(url="/login?tab=email&error=" + quote("Не удалось отправить письмо. Попробуйте позже или войдите через Telegram."), status_code=303)
+        return RedirectResponse(url="/login?tab=email&error=" + quote("Не удалось отправить письмо. Попробуйте позже."), status_code=303)
     return RedirectResponse(url="/login?tab=email&msg=" + quote("Письмо с подтверждением отправлено на " + email + ". Перейдите по ссылке из письма."), status_code=303)
 
 
@@ -689,9 +762,9 @@ async def login_email(request: Request):
         print(f"MAIL login resend-verify -> {email}: ok={ok} err={err}")
         return RedirectResponse(url="/login?tab=email&error=" + quote("Почта не подтверждена. Мы отправили письмо повторно - перейдите по ссылке из него."), status_code=303)
 
-    request.session["email"] = email
-    if acc[3]:
-        request.session["tg_id"] = acc[3]
+    # Почтовый вход полностью самостоятелен: если к учетке не привязан Telegram,
+    # она входит под своим внутренним (виртуальным) ID и пользуется кабинетом как обычно.
+    _enter_email_session(request, email)
     return RedirectResponse(url="/dashboard", status_code=303)
 
 
@@ -716,11 +789,10 @@ async def verify_email(request: Request):
         return _auth_page(request, "verify", "invalid", "Ссылка недействительна или истекла. Попробуйте войти - мы отправим письмо с подтверждением повторно.")
     email, _tg = row
     bot_db.mark_email_verified(email)
-    request.session["email"] = email
-    acc = bot_db.get_email_account(email)
-    if acc and acc[3]:
-        request.session["tg_id"] = acc[3]
-    return _auth_page(request, "verify", "ok", "Почта подтверждена!", email=email)
+    # Сразу пускаем в кабинет: если Telegram не привязан - аккаунт работает
+    # под внутренним виртуальным ID (независимая почтовая учетка).
+    _enter_email_session(request, email)
+    return _auth_page(request, "verify", "ok", "Почта подтверждена! Аккаунт создан - можно переходить в личный кабинет.", email=email)
 
 
 @app.get("/auth/email/forgot")
@@ -773,10 +845,7 @@ async def reset_post(request: Request):
     email, _tg = row
     bot_db.set_email_password(email, emailauth.hash_password(password))
     bot_db.mark_email_verified(email)
-    request.session["email"] = email
-    acc = bot_db.get_email_account(email)
-    if acc and acc[3]:
-        request.session["tg_id"] = acc[3]
+    _enter_email_session(request, email)
     return _auth_page(request, "reset", "ok", "Пароль установлен!", email=email)
 
 
@@ -799,7 +868,9 @@ async def web_link_email(request: Request):
         raise HTTPException(status_code=429, detail="Слишком много писем подряд. Попробуйте через час.")
 
     acc = bot_db.get_email_account(email)
-    if acc and acc[3] and acc[3] != tg_id:
+    # Почта, зарегистрированная самостоятельно (без Telegram, виртуальный ID),
+    # привязку разрешаем: после перехода по ссылке из письма аккаунты объединятся.
+    if acc and acc[3] and not bot_db.is_virtual_tg_id(acc[3]) and acc[3] != tg_id:
         raise HTTPException(status_code=409, detail="Эта почта уже привязана к другому Telegram-аккаунту.")
     if acc and acc[4] and acc[3] == tg_id:
         return {"ok": True, "already": True}
@@ -823,7 +894,13 @@ async def link_email_confirm(request: Request):
     if not row:
         return _auth_page(request, "link", "invalid", "Ссылка привязки недействительна или истекла. Запросите новую в боте.")
     email, tg_id = row
-    bot_db.bind_email_to_tg(email, tg_id)
+    acc = bot_db.get_email_account(email)
+    if acc and bot_db.is_virtual_tg_id(acc[3]):
+        # Это самостоятельная почтовая учетка - тот же человек: объединяем в один
+        # аккаунт (подписки/заказы переносятся на реальный Telegram).
+        bot_db.merge_virtual_into_real(acc[3], tg_id)
+    else:
+        bot_db.bind_email_to_tg(email, tg_id)
     bot_db.mark_email_verified(email)
     # Если у аккаунта еще нет пароля - сразу предлагаем задать его по свежей ссылке
     acc = bot_db.get_email_account(email)
@@ -836,27 +913,18 @@ async def link_email_confirm(request: Request):
 async def dashboard(request: Request):
     tg_id = _current_tg_id(request)
 
-    # Сессия по почте: если почта уже привязана к Telegram - работаем как tg-аккаунт;
-    # если нет - сначала просим привязать Telegram (виджетом), иначе уведомления и подписки некуда вязать.
+    # Почтовая сессия: если в ней уже есть внутренний ID (реальный или виртуальный) -
+    # работаем как обычно. Регистрация по почте самостоятельна: без Telegram кабинет
+    # и покупка конфигов тоже доступны (аккаунт под виртуальным внутренним ID).
     if not tg_id and _current_email(request):
-        acc = bot_db.get_email_account(_current_email(request))
-        if acc and acc[3]:
-            request.session["tg_id"] = acc[3]
-            tg_id = acc[3]
-        else:
-            return templates.TemplateResponse(
-                request=request,
-                name="link_telegram.html",
-                context={
-                    "request": request,
-                    "bot_username": BOT_USERNAME,
-                    "site_url": bot_db.get_setting("site_url") or "https://amneziawg.fun",
-                    "email": _current_email(request),
-                }
-            )
+        tg_id = _enter_email_session(request, _current_email(request))
 
     if not tg_id:
         return RedirectResponse(url="/login")
+
+    is_virtual = bot_db.is_virtual_tg_id(tg_id)
+    if is_virtual and not request.session.get("display_name"):
+        request.session["display_name"] = _current_email(request) or str(tg_id)
 
     profile = bot_db.get_user_profile(tg_id)
     accepted_tos = bool(profile and len(profile) > 3 and profile[3] == 1)
@@ -917,6 +985,9 @@ async def dashboard(request: Request):
             "request": request,
             "display_name": request.session.get("display_name", "Пользователь"),
             "tg_id": tg_id,
+            # аккаунт без Telegram (почтовый) - кабинет показывает карточку привязки
+            "is_virtual": is_virtual,
+            "bot_username": BOT_USERNAME,
             "accepted_tos": accepted_tos,
             "active_subs": active_subs,
             "servers": servers_info,
@@ -1002,10 +1073,13 @@ async def web_create_order(request: Request):
         request_id = bot_db.create_detail_request(tg_id, server_id, period)
 
         full_name = profile[0] if profile and profile[0] else str(tg_id)
+        identity_note = _admin_identity_note(request, tg_id)
+        identity_line = f"{identity_note}\n" if identity_note else ""
         admin_text = (
             f"👤 <b>Новый запрос реквизитов на оплату (с сайта)!</b>\n\n"
             f"Клиент: <b>{full_name}</b>\n"
             f"ID: <code>{tg_id}</code>\n"
+            f"{identity_line}"
             f"Сервер ID: <b>{server_id}</b>\n"
             f"Период: <b>{period}</b>\n\n"
             f"Выдать пользователю реквизиты?"
@@ -1074,11 +1148,14 @@ async def web_upload_receipt(request: Request, server_id: int = Form(...), perio
 
     profile = bot_db.get_user_profile(tg_id)
     full_name = profile[0] if profile and profile[0] else str(tg_id)
+    identity_note = _admin_identity_note(request, tg_id)
+    identity_line = f"{identity_note}\n" if identity_note else ""
 
     admin_text = (
         f"🧾 <b>Новая ручная оплата (с сайта)!</b>\n\n"
         f"Клиент: <b>{full_name}</b>\n"
         f"ID: <code>{tg_id}</code>\n"
+        f"{identity_line}"
         f"Сервер ID: {server_id}\n"
         f"Период: {period}\n"
         f"Сумма: {amount} руб.\n\n"
@@ -1170,11 +1247,14 @@ async def web_support(request: Request):
 
     profile = bot_db.get_user_profile(tg_id)
     full_name = profile[0] if profile and profile[0] else str(tg_id)
+    identity_note = _admin_identity_note(request, tg_id)
+    identity_line = f"{identity_note}\n" if identity_note else ""
 
     admin_text = (
         f"🚨 <b>Новое обращение в поддержку (с сайта)!</b>\n\n"
         f"ID: <code>{tg_id}</code>\n"
-        f"Имя: {full_name}\n\n"
+        f"Имя: {full_name}\n"
+        f"{identity_line}\n"
         f"<b>Текст:</b>\n{text}"
     )
     builder = InlineKeyboardBuilder()
@@ -1215,7 +1295,7 @@ async def web_reissue_config(request: Request):
 async def download_config(request: Request, server_id: int):
     tg_id = _current_tg_id(request)
     if not tg_id:
-        raise HTTPException(status_code=401, detail="Необходимо войти через Telegram, чтобы скачать конфигурацию")
+        raise HTTPException(status_code=401, detail="Необходимо войти в личный кабинет (по почте или через Telegram), чтобы скачать конфигурацию")
 
     sub = bot_db.get_user_sub(tg_id, server_id)
     if not sub or sub[5] == 0:
@@ -1231,7 +1311,7 @@ async def download_config(request: Request, server_id: int):
     return Response(
         content=config_text,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename={tg_id}AWG.conf"}
+        headers={"Content-Disposition": f"attachment; filename={_download_filename(tg_id)}"}
     )
 
 @app.get("/qr/{server_id}")
@@ -1239,7 +1319,7 @@ async def qr_config(request: Request, server_id: int):
     """PNG с QR-кодом конфига - для быстрого импорта на смартфон прямо с экрана (скан в приложении AmneziaWG)."""
     tg_id = _current_tg_id(request)
     if not tg_id:
-        raise HTTPException(status_code=401, detail="Необходимо войти через Telegram")
+        raise HTTPException(status_code=401, detail="Необходимо войти в личный кабинет (по почте или через Telegram)")
 
     sub = bot_db.get_user_sub(tg_id, server_id)
     if not sub or sub[5] == 0:
@@ -1259,7 +1339,7 @@ async def web_get_config(request: Request, server_id: int):
     """Текст конфига для показа в личном кабинете по кнопке (не встраиваем в HTML страницы изначально)."""
     tg_id = _current_tg_id(request)
     if not tg_id:
-        raise HTTPException(status_code=401, detail="Необходимо войти через Telegram")
+        raise HTTPException(status_code=401, detail="Необходимо войти в личный кабинет (по почте или через Telegram)")
 
     sub = bot_db.get_user_sub(tg_id, server_id)
     if not sub or sub[5] == 0:
