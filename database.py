@@ -64,8 +64,12 @@ def init_db():
         ('site_url', 'https://amneziawg.fun'),
         # Автооплата: активный провайдер (off/aipay/platega). По умолчанию выключена.
         ('payment_provider', 'off'),
-        # ID способа оплаты Platega (в примерах их доков: 2 = СБП QR). Уточняется у менеджера.
-        ('platega_payment_method', '2'),
+        # Пустые ключи тоже создаются: поля видны в админке на новой базе.
+        ('aipay_api_key', ''),
+        ('platega_merchant_id', ''),
+        ('platega_secret', ''),
+        # auto = выбор на странице Platega; существующий числовой метод не меняется.
+        ('platega_payment_method', 'auto'),
         # Отправка писем (регистрация по почте): auto | smtp | resend | off
         ('mail_mode', 'auto'),
         ('mail_smtp_host', ''),
@@ -177,6 +181,13 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # Сохраняем провайдера у новых заказов. NULL у старых записей оставляет
+    # прежнее поведение проверки через текущего провайдера (не угадываем сервис).
+    try:
+        cursor.execute("ALTER TABLE orders ADD COLUMN payment_provider TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     # Колонка для хранения текста конфигурации, чтобы отдавать скачивание с сайта
     # в любой момент без повторного обращения по SSH к серверу сервиса
     try:
@@ -241,11 +252,20 @@ def get_setting(key):
     return row[0] if row else None
 
 def update_setting(key, value):
+    update_settings({key: value})
+
+
+def update_settings(values):
+    """Сохраняет связанную группу настроек одной транзакцией (всё или ничего)."""
     conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
-    conn.commit()
-    conn.close()
+    try:
+        with conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                [(key, str(value)) for key, value in values.items()],
+            )
+    finally:
+        conn.close()
 
 # --- Сервера ---
 def add_server(ip, name, port=2222):
@@ -1039,18 +1059,35 @@ def set_detail_request_status(request_id, status):
     conn.close()
     return changed
 
-# --- Автоматическая оплата AiPay ---
-def create_aipay_order(tg_id, server_id, period, amount, aipay_uid):
+# --- Автоматическая оплата (aipay_uid — историческое имя колонки ID транзакции) ---
+def create_auto_order(tg_id, server_id, period, amount, uid, provider):
+    if provider not in ("aipay", "platega"):
+        raise ValueError("Неизвестный провайдер платежа")
     conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO orders (tg_id, server_id, period, amount, status, aipay_uid) VALUES (?, ?, ?, ?, 'pending', ?)",
-        (tg_id, server_id, period, amount, aipay_uid)
-    )
-    order_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return order_id
+    try:
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO orders (tg_id, server_id, period, amount, status, aipay_uid, payment_provider) "
+                "VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+                (tg_id, server_id, period, amount, uid, provider),
+            )
+            return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def create_aipay_order(tg_id, server_id, period, amount, aipay_uid):
+    """Совместимость со старым AiPay-кодом; новый код использует create_auto_order."""
+    return create_auto_order(tg_id, server_id, period, amount, aipay_uid, "aipay")
+
+
+def get_order_provider(uid):
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT payment_provider FROM orders WHERE aipay_uid=?", (uid,)).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
 
 def get_order_by_uid(aipay_uid):
     conn = get_conn()

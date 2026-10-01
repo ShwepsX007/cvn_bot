@@ -261,9 +261,9 @@
         <p>Сумма к оплате: <b id="buyAmount">-</b> руб.</p>
         <div class="d-grid gap-2">
             {% if auto_pay_enabled %}
-            <button class="btn btn-primary rounded-pill" onclick="chooseMethod('auto')">⚡️ Оплатить картой (авто)</button>
+            <button class="btn btn-primary rounded-pill" onclick="chooseMethod('auto')">⚡️ Оплатить онлайн (авто)</button>
             {% else %}
-            <p class="small text-muted text-center mb-0">⚡️ Автооплата картой временно недоступна</p>
+            <p class="small text-muted text-center mb-0">⚡️ Автооплата временно недоступна</p>
             {% endif %}
             <button class="btn btn-outline-secondary rounded-pill" onclick="chooseMethod('manual')">📥 Ручная оплата (по чеку)</button>
         </div>

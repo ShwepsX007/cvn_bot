@@ -1,6 +1,104 @@
 {% extends "admin_base.html" %}
 {% block content %}
 
+<div class="card card-custom p-4 mb-4" id="payments">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h5 class="fw-bold mb-0">💳 Автооплата · Platega</h5>
+        <span class="badge {{ 'bg-success' if payment_settings.enabled else 'bg-secondary' }}">
+            {{ 'Автооплата включена' if payment_settings.enabled else 'Автооплата выключена или не настроена' }}
+        </span>
+        {% if payment_settings.provider != 'off' %}
+        <form method="post" action="/admin/web/settings">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="key" value="payment_provider">
+            <input type="hidden" name="value" value="off">
+            <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill">Выключить автооплату</button>
+        </form>
+        {% endif %}
+    </div>
+    <p class="small text-muted">
+        Merchant ID и Secret получите у менеджера Platega или в
+        <a href="https://my.platega.io" target="_blank" rel="noopener noreferrer">личном кабинете → Настройки</a>.
+        Секретные значения не подставляются в HTML. Пустое поле означает «оставить прежнее».
+        Ключи не нужно добавлять в код или отправлять в поддержку.
+    </p>
+
+    {% if payment_settings.errors %}
+    <div class="alert alert-warning small rounded-3">
+        <b>Для включения Platega нужно заполнить:</b>
+        <ul class="mb-0 mt-1">
+            {% for item in payment_settings.errors %}<li>{{ item }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% else %}
+    <div class="alert alert-info small rounded-3">
+        Настройки Platega заполнены. Это проверка формата, а не подключения к API:
+        после настройки Callback URL проведите реальный тестовый платёж.
+    </div>
+    {% endif %}
+
+    <form method="post" action="/admin/web/settings/payments" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-6">
+            <label for="payment-provider" class="form-label">Провайдер автооплаты</label>
+            <select id="payment-provider" name="payment_provider" class="form-select">
+                <option value="off" {{ 'selected' if payment_settings.provider == 'off' }}>Выключена — только ручная оплата</option>
+                <option value="platega" {{ 'selected' if payment_settings.provider == 'platega' }}>Platega</option>
+                <option value="aipay" {{ 'selected' if payment_settings.provider == 'aipay' }}>AiPay (старый провайдер)</option>
+            </select>
+            <small class="text-muted">Включение без необходимых ключей заблокировано. Ручная оплата остаётся доступной.</small>
+        </div>
+        <div class="col-md-6">
+            <label for="platega-method" class="form-label">Способ оплаты Platega</label>
+            <input id="platega-method" type="text" name="platega_payment_method" list="platega-methods"
+                   class="form-control" value="{{ payment_settings.method }}" required>
+            <datalist id="platega-methods">
+                <option value="auto">Выбор способа на странице Platega (рекомендуется)</option>
+                <option value="2">СБП / QR</option>
+                <option value="13">Криптовалюта (если подключена)</option>
+            </datalist>
+            <small class="text-muted"><code>auto</code> — клиент выбирает из подключённых способов; <code>2</code> — СБП / QR.
+                Другой числовой ID вводите только по указанию менеджера.</small>
+        </div>
+        <div class="col-md-6">
+            <label for="platega-merchant" class="form-label">Merchant ID <code>X-MerchantId</code></label>
+            <input id="platega-merchant" type="text" name="platega_merchant_id" class="form-control font-monospace"
+                   autocomplete="off" spellcheck="false" placeholder="UUID мерчанта">
+            <small class="text-muted">{{ '✅ Уже сохранён; оставьте пустым, если не меняете.' if payment_settings.merchant_set else 'Не задан. Вставьте UUID магазина из Platega.' }}</small>
+        </div>
+        <div class="col-md-6">
+            <label for="platega-secret" class="form-label">Secret / API-ключ <code>X-Secret</code></label>
+            <input id="platega-secret" type="password" name="platega_secret" class="form-control"
+                   autocomplete="new-password" placeholder="API-ключ Platega">
+            <small class="text-muted">{{ '✅ Уже сохранён; пустое поле не заменяет ключ.' if payment_settings.secret_set else 'Не задан. Вставьте секретный API-ключ магазина.' }}</small>
+        </div>
+        <div class="col-12">
+            <label for="payment-site-url" class="form-label">Публичный HTTPS-адрес вашего сайта</label>
+            <input id="payment-site-url" type="url" name="site_url" class="form-control"
+                   value="{{ payment_settings.site_url }}" placeholder="https://ваш-домен" required>
+            <small class="text-muted">Не адрес Platega. Без пути и параметров: после оплаты клиент вернётся на <code>/dashboard</code>.</small>
+        </div>
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary rounded-pill px-4">💾 Сохранить настройки оплаты</button>
+        </div>
+    </form>
+
+    <div class="border-top mt-4 pt-3">
+        <label for="platega-webhook-url" class="form-label fw-bold">Callback URL — вписать в личном кабинете Platega</label>
+        <input id="platega-webhook-url" class="form-control font-monospace" type="text" readonly
+               value="{{ payment_settings.webhook_url }}" placeholder="Сначала сохраните корректный адрес сайта">
+        <small class="text-muted d-block mt-2">
+            В Platega: <b>Настройки → Callback URLs</b>. Скопируйте адрес выше в URL уведомлений о статусе платежа.
+            Он рассчитан по сохранённому адресу сайта; после смены домена обновите его в Platega.
+            Без callback автоматическая выдача при закрытой странице оплаты не сработает.
+        </small>
+        <small class="text-muted d-block mt-2">
+            API: <code>{{ payment_settings.api_url }}</code> ·
+            <a href="https://docs.platega.io/" target="_blank" rel="noopener noreferrer">Официальная документация</a>
+        </small>
+    </div>
+</div>
+
 <div class="card card-custom p-4">
     <h5 class="fw-bold mb-1">⚙️ Настройки</h5>
     <small class="text-muted d-block mb-3">
@@ -22,6 +120,7 @@
             <small class="text-muted d-block">Конфиги клиентов не меняются (ключи в volume), даунтайм ~10 сек; о результате бот отчитается вам в личку, а на странице «Серверы» останется отчёт.</small>
         </div>
         <form method="post" action="/admin/web/settings" class="d-flex align-items-center gap-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="key" value="container_autoupdate">
             <input type="hidden" name="value" id="autoup_value" value="{{ 'off' if container_autoupdate else 'on' }}">
             <button class="btn btn-{{ 'danger' if container_autoupdate else 'success' }} btn-sm rounded-pill px-3">
@@ -42,7 +141,8 @@
                         {% if row.masked %}<br><small class="text-muted">сейчас: {{ row.masked }}</small>{% endif %}
                     </td>
                     <td>
-                        <form method="post" action="/admin/web/settings" class="d-flex gap-2">
+                        <form id="setting-form-{{ loop.index }}" method="post" action="/admin/web/settings" class="d-flex gap-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <input type="hidden" name="key" value="{{ row.key }}">
                             {% if row.is_html %}
                                 <textarea name="value" class="form-control form-control-sm font-monospace" rows="{{ row.textarea_rows }}" placeholder="<…> HTML-код будет вставлен как есть, без экранирования">{{ row.value }}</textarea>
@@ -54,13 +154,13 @@
                             {% elif row.is_long %}
                                 <textarea name="value" class="form-control form-control-sm" rows="2">{{ row.value }}</textarea>
                             {% else %}
-                                <input type="text" name="value" class="form-control form-control-sm"
+                                <input type="{{ 'password' if row.is_secret else 'text' }}" name="value" class="form-control form-control-sm"
                                        value="{{ row.value }}" placeholder="{{ 'введите новое значение…' if row.is_secret }}">
                             {% endif %}
+                        </form>
                     </td>
                     <td class="text-end">
-                            <button class="btn btn-primary btn-sm rounded-pill">💾</button>
-                        </form>
+                        <button type="submit" form="setting-form-{{ loop.index }}" class="btn btn-primary btn-sm rounded-pill">💾</button>
                     </td>
                 </tr>
             {% endfor %}

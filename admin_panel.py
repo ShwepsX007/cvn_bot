@@ -7,11 +7,16 @@ from aiogram.fsm.state import StatesGroup, State
 import database as db
 import ssh_manager as ssh
 import mailer
+import payments
+import platega
 from aiogram import html
 from user_handlers import issue_vpn_access
 from config import ADMIN_ID
 
 admin_router = Router()
+# Все административные обработчики, включая ввод платёжных ключей, закрыты для клиентов.
+admin_router.message.filter(F.from_user.id == ADMIN_ID)
+admin_router.callback_query.filter(F.from_user.id == ADMIN_ID)
 
 class AdminStates(StatesGroup):
     waiting_for_ip = State()
@@ -31,6 +36,7 @@ class AdminStates(StatesGroup):
     waiting_for_mail_value = State()
     waiting_for_platega_merchant = State()
     waiting_for_platega_secret = State()
+    waiting_for_platega_method = State()
     waiting_for_site_url = State()
 
 def get_admin_keyboard():
@@ -403,7 +409,11 @@ async def view_settings(callback: CallbackQuery):
     platega_sec = db.get_setting("platega_secret")
     platega_mid_status = f"✅ Задан (...{platega_mid[-4:]})" if platega_mid else "❌ Не задан"
     platega_sec_status = f"✅ Задан (...{platega_sec[-4:]})" if platega_sec else "❌ Не задан"
-    platega_method = db.get_setting("platega_payment_method") or "2"
+    platega_method = db.get_setting("platega_payment_method") or platega.DEFAULT_PAYMENT_METHOD
+    try:
+        platega_callback = platega.get_webhook_url()
+    except ValueError:
+        platega_callback = "сначала задайте HTTPS-адрес сайта"
     site_url = db.get_setting("site_url") or "не задан"
     mail_status = mailer.describe()
     resend_key = db.get_setting("mail_resend_key")
@@ -418,8 +428,9 @@ async def view_settings(callback: CallbackQuery):
     text += f"🔑 AiPay API-ключ: {aipay_status}\n"
     text += f"🆔 Platega Merchant ID: {platega_mid_status}\n"
     text += f"🔑 Platega Secret: {platega_sec_status}\n"
-    text += f"🧾 Platega ID метода оплаты: {platega_method}\n"
-    text += f"🌐 Адрес сайта: {site_url}\n\n"
+    text += f"🧾 Platega метод: {html.quote(platega_method)} (auto = выбор на странице)\n"
+    text += f"🔔 Callback URL для ЛК Platega: <code>{html.quote(platega_callback)}</code>\n"
+    text += f"🌐 Адрес сайта: {html.quote(site_url)}\n\n"
     text += f"📧 Отправка писем (регистрация по почте): <b>{mail_status}</b>\n"
     text += f"🔑 Resend API-ключ: {resend_status}\n"
     text += f"   (SMTP-параметры задаются кнопками ниже)\n"
@@ -427,11 +438,11 @@ async def view_settings(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="🖥 Цены серверов", callback_data="adm_srv_prices_menu"))
     builder.add(InlineKeyboardButton(text="💳 Реквизиты оплаты", callback_data="set_manual_payment_details"))
-    builder.add(InlineKeyboardButton(text="🔁 Автооплата: вкл/выкл/провайдер", callback_data="pay_provider_switch"))
+    builder.add(InlineKeyboardButton(text="💳 Выбрать провайдера автооплаты", callback_data="pay_provider_switch"))
     builder.add(InlineKeyboardButton(text="🔑 API-ключ AiPay", callback_data="set_aipay_api_key"))
     builder.add(InlineKeyboardButton(text="🆔 Platega Merchant ID", callback_data="set_platega_merchant"))
     builder.add(InlineKeyboardButton(text="🔑 Platega Secret", callback_data="set_platega_secret"))
-    builder.add(InlineKeyboardButton(text="🧾 Platega ID метода", callback_data="set_platega_payment_method"))
+    builder.add(InlineKeyboardButton(text="🧾 Platega метод (auto / ID)", callback_data="set_platega_payment_method"))
     builder.add(InlineKeyboardButton(text="🌐 Адрес сайта", callback_data="set_site_url"))
     builder.add(InlineKeyboardButton(text="📧 Тип отправки почты", callback_data="mail_mode_switch"))
     builder.add(InlineKeyboardButton(text="📮 SMTP хост", callback_data="set_mail_smtp_host"))
@@ -467,14 +478,31 @@ async def set_aipay_key_proc(message: Message, state: FSMContext):
     await message.answer("✅ API-ключ AiPay успешно сохранен!", reply_markup=get_admin_keyboard())
     await state.clear()
 
-# --- ПЕРЕКЛЮЧЕНИЕ ПЛАТЕЖНОГО ПРОВАЙДЕРА (off -> platega -> aipay -> off) ---
+# --- ВЫБОР ПЛАТЕЖНОГО ПРОВАЙДЕРА ---
 @admin_router.callback_query(F.data == "pay_provider_switch")
 async def pay_provider_switch(callback: CallbackQuery):
-    cur = (db.get_setting("payment_provider") or "off").strip().lower()
-    nxt = {"off": "platega", "platega": "aipay", "aipay": "off"}.get(cur, "off")
-    db.update_setting("payment_provider", nxt)
-    names = {"off": "❌ Выключена", "aipay": "AiPay", "platega": "Platega"}
-    await callback.answer(f"Автооплата: {names[nxt]}")
+    builder = InlineKeyboardBuilder()
+    for provider, name in payments.PROVIDER_LABELS.items():
+        marker = "✅ " if provider == payments.get_provider() else ""
+        builder.add(InlineKeyboardButton(text=f"{marker}{name}", callback_data=f"pay_provider_set_{provider}"))
+    builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data="adm_settings"))
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "💳 Выберите провайдера автооплаты. Перед включением Platega сохраните Merchant ID, Secret и HTTPS-адрес сайта. Ручная оплата остаётся доступной.",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("pay_provider_set_"))
+async def pay_provider_set(callback: CallbackQuery):
+    try:
+        provider = payments.normalize_setting("payment_provider", callback.data.removeprefix("pay_provider_set_"))
+        payments.validate_configuration(provider)
+    except ValueError as exc:
+        return await callback.answer(str(exc)[:190], show_alert=True)
+    db.update_setting("payment_provider", provider)
+    await callback.answer(f"Автооплата: {payments.PROVIDER_LABELS[provider]}")
     await view_settings(callback)
 
 # --- НАСТРОЙКИ ОТПРАВКИ ПИСЕМ (регистрация по почте) ---
@@ -543,11 +571,21 @@ async def set_platega_merchant_start(callback: CallbackQuery, state: FSMContext)
     await state.set_state(AdminStates.waiting_for_platega_merchant)
     await callback.answer()
 
+async def _save_payment_setting(message: Message, state: FSMContext, key: str, success_text: str):
+    try:
+        value = payments.normalize_setting(key, message.text or "")
+    except ValueError as exc:
+        await message.answer(f"❌ {html.quote(str(exc))}", parse_mode="HTML")
+        return False
+    db.update_setting(key, value)
+    await message.answer(success_text, reply_markup=get_admin_keyboard())
+    await state.clear()
+    return True
+
+
 @admin_router.message(AdminStates.waiting_for_platega_merchant)
 async def set_platega_merchant_proc(message: Message, state: FSMContext):
-    db.update_setting("platega_merchant_id", message.text.strip())
-    await message.answer("✅ Platega Merchant ID сохранен!", reply_markup=get_admin_keyboard())
-    await state.clear()
+    await _save_payment_setting(message, state, "platega_merchant_id", "✅ Platega Merchant ID сохранён!")
 
 @admin_router.callback_query(F.data == "set_platega_secret")
 async def set_platega_secret_start(callback: CallbackQuery, state: FSMContext):
@@ -564,17 +602,36 @@ async def set_platega_secret_start(callback: CallbackQuery, state: FSMContext):
 
 @admin_router.message(AdminStates.waiting_for_platega_secret)
 async def set_platega_secret_proc(message: Message, state: FSMContext):
-    db.update_setting("platega_secret", message.text.strip())
-    await message.answer("✅ Platega Secret сохранен!", reply_markup=get_admin_keyboard())
-    await state.clear()
+    if await _save_payment_setting(message, state, "platega_secret", "✅ Platega Secret сохранён!"):
+        # По возможности не оставляем API-ключ в истории чата.
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+
+@admin_router.callback_query(F.data == "set_platega_payment_method")
+async def set_platega_method_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer(
+        "Введите <code>auto</code>, чтобы клиент выбирал способ на странице Platega (рекомендуется), "
+        "или числовой ID: <code>2</code> — СБП / QR. Другой ID согласуйте с менеджером Platega.",
+        parse_mode="HTML",
+    )
+    await state.set_state(AdminStates.waiting_for_platega_method)
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_platega_method)
+async def set_platega_method_proc(message: Message, state: FSMContext):
+    await _save_payment_setting(message, state, "platega_payment_method", "✅ Метод оплаты Platega сохранён!")
 
 @admin_router.callback_query(F.data == "set_site_url")
 async def set_site_url_start(callback: CallbackQuery, state: FSMContext):
     current = db.get_setting("site_url") or "не задан"
     await callback.message.answer(
-        f"Текущий адрес сайта: <code>{current}</code>\n\n"
+        f"Текущий адрес сайта: <code>{html.quote(current)}</code>\n\n"
         f"Введите новый адрес сайта БЕЗ слеша в конце (например: https://amneziawg.fun).\n"
-        f"Он используется для кнопки входа через Telegram на сайте.",
+        f"Он используется для входа через Telegram, возврата после оплаты и Callback URL Platega.",
         parse_mode="HTML"
     )
     await state.set_state(AdminStates.waiting_for_site_url)
@@ -582,9 +639,10 @@ async def set_site_url_start(callback: CallbackQuery, state: FSMContext):
 
 @admin_router.message(AdminStates.waiting_for_site_url)
 async def set_site_url_proc(message: Message, state: FSMContext):
-    db.update_setting("site_url", message.text.strip().rstrip("/"))
-    await message.answer("✅ Адрес сайта сохранен! Не забудьте также указать этот домен в @BotFather (/setdomain).", reply_markup=get_admin_keyboard())
-    await state.clear()
+    await _save_payment_setting(
+        message, state, "site_url",
+        "✅ Адрес сайта сохранён! Обновите Callback URL в Platega и домен в @BotFather (/setdomain).",
+    )
 
 @admin_router.callback_query(F.data == "set_manual_payment_details")
 async def set_man_det(callback: CallbackQuery, state: FSMContext):
@@ -606,6 +664,7 @@ async def set_man_det_proc(message: Message, state: FSMContext):
     & (F.data != "set_aipay_api_key")
     & (F.data != "set_platega_merchant")
     & (F.data != "set_platega_secret")
+    & (F.data != "set_platega_payment_method")
     & (F.data != "set_site_url")
 )
 async def change_setting_start(callback: CallbackQuery, state: FSMContext):

@@ -1059,13 +1059,15 @@ async def web_create_order(request: Request):
     if method == "auto":
         if not payments.is_auto_pay_enabled():
             raise HTTPException(status_code=503, detail="Автоматическая оплата временно недоступна. Воспользуйтесь ручной оплатой.")
+        provider = payments.get_provider()
         try:
             payment_url, uid = await payments.create_order(
-                amount, "RUB", tg_id=tg_id, client_ip=request.headers.get("X-Real-IP")
+                amount, "RUB", tg_id=tg_id, username=profile[1],
+                client_ip=request.headers.get("X-Real-IP"), provider=provider,
             )
         except Exception as e:
             raise HTTPException(status_code=502, detail=str(e))
-        bot_db.create_aipay_order(tg_id, server_id, period, amount, uid)
+        bot_db.create_auto_order(tg_id, server_id, period, amount, uid, provider)
         return {"success": True, "payment_url": payment_url, "uid": uid, "amount": amount}
 
     elif method == "manual":
@@ -1202,7 +1204,9 @@ async def web_check_aipay(request: Request, uid: str):
         return {"status": status}
 
     try:
-        remote_status = await payments.get_order_status(uid)
+        remote_status = await payments.get_order_status(
+            uid, provider=bot_db.get_order_provider(uid), expected_amount=amount
+        )
     except Exception:
         return {"status": "pending"}
 
@@ -1379,6 +1383,8 @@ async def aipay_webhook(request: Request):
         return {"ok": True}
 
     order_id, tg_id, s_id, period, amount, order_status = order
+    if bot_db.get_order_provider(uid) not in (None, "aipay"):
+        return {"ok": True}
 
     if status_id == aipay.STATUS_SUCCESS:
         if bot_db.complete_order_by_uid(uid):
@@ -1408,12 +1414,7 @@ async def aipay_webhook(request: Request):
 
 @app.post("/webhook/platega")
 async def platega_webhook(request: Request):
-    """
-    Callback от Platega о смене статуса транзакции.
-    Этот URL нужно один раз указать в личном кабинете Platega (my.platega.io -> Настройки -> Callback URLs),
-    например: https://amneziawg.fun/webhook/platega (только HTTPS с валидным сертификатом).
-    Аутентификация - по заголовкам X-MerchantId и X-Secret (проверяются внутри).
-    """
+    """URL из ЛК Platega → Настройки → Callback URLs. Авторизация по двум заголовкам."""
     if not platega.verify_webhook_headers(request.headers):
         raise HTTPException(status_code=403, detail="Invalid credentials")
 
@@ -1421,43 +1422,54 @@ async def platega_webhook(request: Request):
         data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON object")
 
-    uid = data.get("id")
-    raw_status = (data.get("status") or "").upper()
-    if not uid:
-        raise HTTPException(status_code=400, detail="Missing id")
+    uid, raw_status = data.get("id"), data.get("status")
+    if not isinstance(uid, str) or not uid.strip() or not isinstance(raw_status, str) or not raw_status.strip():
+        raise HTTPException(status_code=400, detail="Missing or invalid id/status")
+    raw_status = raw_status.strip().upper()
 
     order = bot_db.get_order_by_uid(uid)
     if not order:
-        # Не наш заказ - отвечаем 200, чтобы Platega не повторяла callback
+        # Не наш заказ — не заставляем сервис повторять уведомление.
+        return {"ok": True}
+    if bot_db.get_order_provider(uid) not in (None, "platega"):
         return {"ok": True}
 
     order_id, tg_id, s_id, period, amount, order_status = order
-
-    if raw_status == "CONFIRMED":
+    status_id = platega.map_status(raw_status)
+    if status_id == platega.STATUS_SUCCESS:
+        if not platega.payment_matches(data.get("amount"), data.get("currency"), amount):
+            raise HTTPException(status_code=400, detail="Payment amount/currency mismatch")
+        # Атомарная смена pending → paid общая для callback и проверки в кабинете/боте.
         if bot_db.complete_order_by_uid(uid):
-            success, msg = await issue_vpn_access(bot, tg_id, s_id, period, notify_admin=True)
+            try:
+                success, msg = await issue_vpn_access(bot, tg_id, s_id, period, notify_admin=True)
+            except Exception as exc:
+                success, msg = False, str(exc)
             if not success:
                 try:
+                    from html import escape
                     await bot.send_message(
                         ADMIN_ID,
-                        f"⚠️ Platega: оплата <code>{uid}</code> подтверждена, но выдача доступа пользователю "
-                        f"<code>{tg_id}</code> завершилась ошибкой:\n{msg}",
-                        parse_mode="HTML"
+                        f"⚠️ Platega: оплата <code>{escape(uid)}</code> подтверждена, но выдача доступа пользователю "
+                        f"<code>{tg_id}</code> завершилась ошибкой:\n{escape(str(msg))}",
+                        parse_mode="HTML",
                     )
                 except Exception:
                     pass
-    elif raw_status in ("CANCELED", "CHARGEBACKED"):
-        bot_db.fail_order_by_uid(uid, "cancelled" if raw_status == "CANCELED" else "failed")
-        try:
-            await bot.send_message(
-                tg_id,
-                "❌ Оплата не была завершена (отменена или произошла ошибка). "
-                "Попробуйте снова или воспользуйтесь ручной оплатой."
-            )
-        except Exception:
-            pass
-
+    elif status_id in (platega.STATUS_ERROR, platega.STATUS_CANCELLED):
+        changed = bot_db.fail_order_by_uid(uid, "cancelled" if status_id == platega.STATUS_CANCELLED else "failed")
+        if changed:
+            try:
+                await bot.send_message(
+                    tg_id,
+                    "❌ Оплата не была завершена (отменена или произошла ошибка). "
+                    "Попробуйте снова или воспользуйтесь ручной оплатой.",
+                )
+            except Exception:
+                pass
     return {"ok": True}
 
 

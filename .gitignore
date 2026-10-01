@@ -1,0 +1,20 @@
+# Local secrets and runtime state
+config_tokens.py
+.session_secret
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+
+# Python environments and test artifacts
+.venv/
+.testenv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/

@@ -11,6 +11,8 @@
 """
 
 import asyncio
+import hmac
+import secrets
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Form, HTTPException
@@ -20,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 import database as db
 import mailer
 import payments
+import platega
 from config import ADMIN_ID
 
 router = APIRouter(prefix="/admin/web", tags=["web-admin"])
@@ -64,8 +67,9 @@ SETTING_LABELS = {
 
 # Эти ключи не показываем в таблице настроек: container_autoupdate рисуется отдельным
 # чекбоксом, остальные - служебные (меняются кодом, а не руками).
+PAYMENT_FORM_KEYS = {"payment_provider", *platega.SETTING_KEYS}
 HIDDEN_SETTING_KEYS = {"container_autoupdate", "node_update_report",
-                       "stats_baseline_count", "stats_baseline_sum"}
+                       "stats_baseline_count", "stats_baseline_sum", *PAYMENT_FORM_KEYS}
 
 PERIOD_LABELS = {"trial": "Пробный", "1d": "1 день", "7d": "7 дней", "30d": "30 дней"}
 
@@ -479,6 +483,20 @@ async def admin_manual_action(request: Request, order_id: int = Form(...), actio
 
 
 # ==================== НАСТРОЙКИ ====================
+def _settings_csrf(request: Request) -> str:
+    token = request.session.get("settings_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        request.session["settings_csrf"] = token
+    return token
+
+
+def _verify_settings_csrf(request: Request, token: str):
+    expected = request.session.get("settings_csrf") or ""
+    if not expected or not token or not hmac.compare_digest(token.encode(), expected.encode()):
+        raise HTTPException(status_code=403, detail="Обновите страницу настроек и повторите сохранение.")
+
+
 @router.get("/settings")
 async def admin_settings(request: Request):
     if not _admin_tg(request):
@@ -499,21 +517,79 @@ async def admin_settings(request: Request):
             "is_long": (len(value or "") > 40 or is_html) and not is_secret,
             "textarea_rows": 8 if is_html else 2,
         })
+    try:
+        webhook_url = platega.get_webhook_url()
+    except ValueError:
+        webhook_url = ""
+    payment_settings = {
+        "provider": payments.get_provider(),
+        "merchant_set": bool(db.get_setting("platega_merchant_id")),
+        "secret_set": bool(db.get_setting("platega_secret")),
+        "method": db.get_setting("platega_payment_method") or platega.DEFAULT_PAYMENT_METHOD,
+        "site_url": db.get_setting("site_url") or "",
+        "webhook_url": webhook_url,
+        "api_url": platega.BASE_URL,
+        "errors": payments.configuration_errors("platega"),
+        "enabled": payments.is_auto_pay_enabled(),
+    }
     return templates.TemplateResponse(request=request, name="admin_settings.html", context=_ctx(
         request, "settings", rows=rows, mail_status=mailer.describe(),
+        payment_settings=payment_settings, csrf_token=_settings_csrf(request),
         container_autoupdate=(db.get_setting("container_autoupdate") or "").strip().lower() == "on"
     ))
 
 
-@router.post("/settings")
-async def admin_settings_save(request: Request, key: str = Form(...), value: str = Form("")):
+@router.post("/settings/payments")
+async def admin_payment_settings_save(
+    request: Request,
+    payment_provider: str = Form(...),
+    platega_merchant_id: str = Form(""),
+    platega_secret: str = Form(""),
+    platega_payment_method: str = Form(...),
+    site_url: str = Form(...),
+    csrf_token: str = Form(""),
+):
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
+    _verify_settings_csrf(request, csrf_token)
+    values = {
+        "payment_provider": payment_provider,
+        "platega_payment_method": platega_payment_method,
+        "site_url": site_url,
+        # Пустые поля не удаляют ранее сохранённые реквизиты.
+        "platega_merchant_id": platega_merchant_id.strip() or db.get_setting("platega_merchant_id") or "",
+        "platega_secret": platega_secret.strip() or db.get_setting("platega_secret") or "",
+    }
+    try:
+        values = {
+            key: payments.normalize_setting(key, value) if value or key not in SECRET_KEYS else ""
+            for key, value in values.items()
+        }
+        payments.validate_configuration(values["payment_provider"], values)
+    except ValueError as exc:
+        return _back("/admin/web/settings", error=str(exc))
+    db.update_settings(values)
+    return _back("/admin/web/settings", msg="Настройки оплаты сохранены. Не забудьте указать Callback URL в личном кабинете Platega.")
+
+
+@router.post("/settings")
+async def admin_settings_save(request: Request, key: str = Form(...), value: str = Form(""),
+                              csrf_token: str = Form("")):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    _verify_settings_csrf(request, csrf_token)
     key = key.strip()
     value = value.strip()
     # Пустое значение секретного поля = «не менять»
     if key in SECRET_KEYS and value == "":
         return _back("/admin/web/settings", msg=f"{key}: без изменений.")
+    if key in payments.SETTING_KEYS:
+        try:
+            value = payments.normalize_setting(key, value)
+            if key == "payment_provider":
+                payments.validate_configuration(value)
+        except ValueError as exc:
+            return _back("/admin/web/settings", error=str(exc))
     db.update_setting(key, value)
     return _back("/admin/web/settings", msg=f"Настройка «{SETTING_LABELS.get(key, key)}» сохранена.")
 

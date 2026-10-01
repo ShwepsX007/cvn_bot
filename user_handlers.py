@@ -480,7 +480,7 @@ async def ask_for_details_prompt(callback: CallbackQuery):
     if auto_enabled:
         text = (
             "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
-            "⚡️ <b>Оплата картой (авто)</b> — доступ выдается автоматически сразу после оплаты.\n"
+            "⚡️ <b>Онлайн-оплата (авто)</b> — доступ выдается автоматически сразу после оплаты.\n"
             "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
             "<i>Выберите удобный способ оплаты.</i>"
         )
@@ -488,11 +488,11 @@ async def ask_for_details_prompt(callback: CallbackQuery):
         text = (
             "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
             "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
-            "<i>⚡️ Автоматическая оплата картой временно недоступна.</i>"
+            "<i>⚡️ Автоматическая онлайн-оплата временно недоступна.</i>"
         )
     builder = InlineKeyboardBuilder()
     if auto_enabled:
-        builder.add(InlineKeyboardButton(text="⚡️ Оплатить картой (авто)", callback_data=f"autopay_{s_id}_{period}"))
+        builder.add(InlineKeyboardButton(text="⚡️ Оплатить онлайн (авто)", callback_data=f"autopay_{s_id}_{period}"))
     builder.add(InlineKeyboardButton(text="📥 Запрос реквизитов", callback_data=f"ask_det_{s_id}_{period}"))
     builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"buy_srv_{s_id}"))
     builder.adjust(1)
@@ -518,11 +518,12 @@ async def autopay_create(callback: CallbackQuery):
     if amount <= 0:
         return await callback.answer("Не удалось определить цену тарифа.", show_alert=True)
 
+    provider = payments.get_provider()
     await callback.answer("⏳ Создаю платеж...")
 
     try:
         payment_url, uid = await payments.create_order(
-            amount, "RUB", tg_id=tg_id, username=callback.from_user.username
+            amount, "RUB", tg_id=tg_id, username=callback.from_user.username, provider=provider
         )
     except Exception as e:
         await callback.message.answer(
@@ -532,7 +533,7 @@ async def autopay_create(callback: CallbackQuery):
         )
         return
 
-    db.create_aipay_order(tg_id, s_id, period, amount, uid)
+    db.create_auto_order(tg_id, s_id, period, amount, uid, provider)
 
     text = (
         f"💳 <b>Автоматическая оплата</b>\n\n"
@@ -556,6 +557,8 @@ async def autopay_check_status(callback: CallbackQuery):
         return await callback.answer("Заказ не найден.", show_alert=True)
 
     order_id, tg_id, s_id, period, amount, status = order
+    if tg_id != callback.from_user.id:
+        return await callback.answer("Доступ к чужому заказу запрещён.", show_alert=True)
 
     if status == "paid":
         return await callback.answer("✅ Оплата уже подтверждена, доступ выдан.", show_alert=True)
@@ -563,7 +566,9 @@ async def autopay_check_status(callback: CallbackQuery):
         return await callback.answer("❌ Этот платеж не был завершен (отменен или произошла ошибка).", show_alert=True)
 
     try:
-        remote_status = await payments.get_order_status(uid)
+        remote_status = await payments.get_order_status(
+            uid, provider=db.get_order_provider(uid), expected_amount=amount
+        )
     except Exception:
         return await callback.answer("Не удалось проверить статус, попробуйте чуть позже.", show_alert=True)
 
@@ -877,7 +882,7 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
     Уведомляет администратора о выдаче доступа - только в случаях, когда у админа иначе
     НЕТ видимости происходящего:
       - пробный период (self-service, никакого одобрения не требуется) - уведомляем ВСЕГДА;
-      - автооплата картой (провайдер из payments.py) - уведомляем, если вызывающий код передал notify_admin=True
+      - автооплата (провайдер из payments.py) - уведомляем, если вызывающий код передал notify_admin=True
         (вебхук / поллинг статуса оплаты).
     Ручную оплату здесь не дублируем - админ и так видит это сразу же после нажатия
     "Подтвердить" в confirm_manual_order().
@@ -892,7 +897,7 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
         period_label = {"1d": "1 день", "7d": "7 дней", "30d": "30 дней"}.get(period, period)
         action_label = "Продление подписки" if renewed else "Новая оплата"
         text = (
-            f"💳 <b>{action_label} картой (авто)!</b>\n\n"
+            f"💳 <b>{action_label} (авто)!</b>\n\n"
             f"Пользователь: <code>{tg_id}</code>\n"
             f"Сервер: <b>{srv_name}</b>\n"
             f"Период: {period_label}"

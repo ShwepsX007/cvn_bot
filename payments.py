@@ -1,15 +1,8 @@
-"""
-Единая точка входа для автоматических платежей.
+"""Единая точка входа автоматических платежей для сайта и Telegram-бота.
 
-Весь остальной код (web_app.py, user_handlers.py) работает ТОЛЬКО с этим модулем
-и ничего не знает про конкретного провайдера. Провайдер переключается настройкой
-payment_provider в базе (Админ-панель → ⚙️ Настройки бота → 💳 Автооплата):
-
-  off     - автооплата выключена (кнопки скрыты на сайте и в боте; ручная оплата работает)
-  aipay   - старый провайдер AiPay   (модуль aipay.py)
-  platega - новый провайдер Platega  (модуль platega.py)
-
-Коды статусов унифицированы у всех провайдеров (см. aipay.py / platega.py).
+payment_provider: off / aipay / platega. Новый заказ использует выбранного
+провайдера; ранее созданный проверяется у провайдера, сохранённого в заказе,
+даже после отключения автооплаты или переключения платёжной системы.
 """
 
 import aipay
@@ -23,13 +16,16 @@ STATUS_ERROR = 4
 STATUS_CANCELLED = 5
 STATUS_ON_HOLD = 6
 
-_PROVIDERS = {
-    "aipay": aipay,
-    "platega": platega,
-}
+_PROVIDERS = {"aipay": aipay, "platega": platega}
+PROVIDER_LABELS = {"off": "Выключена", "platega": "Platega", "aipay": "AiPay"}
+SETTING_KEYS = {"payment_provider", "aipay_api_key", *platega.SETTING_KEYS}
 
 
 class AutoPayDisabled(Exception):
+    pass
+
+
+class PaymentConfigurationError(ValueError):
     pass
 
 
@@ -37,29 +33,62 @@ def get_provider() -> str:
     return (db.get_setting("payment_provider") or "off").strip().lower()
 
 
+def normalize_setting(key: str, value: str) -> str:
+    value = (value or "").strip()
+    if key == "payment_provider":
+        value = value.lower()
+        if value not in PROVIDER_LABELS:
+            raise PaymentConfigurationError("Выберите провайдера: off, platega или aipay.")
+    if key in platega.SETTING_KEYS:
+        return platega.normalize_setting(key, value)
+    return value
+
+
+def configuration_errors(provider: str | None = None, settings: dict | None = None) -> list[str]:
+    provider = get_provider() if provider is None else provider
+    if provider == "off":
+        return []
+    if provider == "platega":
+        return platega.configuration_errors(settings)
+    if provider == "aipay":
+        key = (settings or {}).get("aipay_api_key", db.get_setting("aipay_api_key"))
+        return [] if key and key.strip() else ["Сначала задайте API-ключ AiPay."]
+    return ["Неизвестный провайдер автооплаты. Выберите off, platega или aipay."]
+
+
+def validate_configuration(provider: str | None = None, settings: dict | None = None):
+    errors = configuration_errors(provider, settings)
+    if errors:
+        raise PaymentConfigurationError(" ".join(errors))
+
+
 def is_auto_pay_enabled() -> bool:
-    return get_provider() in _PROVIDERS
+    provider = get_provider()
+    return provider in _PROVIDERS and not configuration_errors(provider)
 
 
-def module():
-    """Активный платежный модуль или None, если автооплата выключена."""
-    return _PROVIDERS.get(get_provider())
+def module(provider: str | None = None):
+    return _PROVIDERS.get(get_provider() if provider is None else provider)
 
 
-async def create_order(amount, currency: str = "RUB", tg_id=None, username=None, client_ip=None):
-    """Создание платежа у активного провайдера -> (payment_url, uid)."""
-    mod = module()
+async def create_order(amount, currency: str = "RUB", tg_id=None, username=None,
+                       client_ip=None, provider: str | None = None):
+    """Создание заказа; provider позволяет зафиксировать выбор до await."""
+    provider = get_provider() if provider is None else provider
+    mod = module(provider)
     if mod is None:
         raise AutoPayDisabled("Автоматическая оплата временно отключена.")
+    validate_configuration(provider)
     if mod is aipay:
-        # Старый модуль не принимает доп. параметры метаданных
         return await aipay.create_order(amount, currency)
     return await mod.create_order(amount, currency, tg_id=tg_id, username=username, client_ip=client_ip)
 
 
-async def get_order_status(uid: str) -> dict:
-    """Статус заказа у активного провайдера -> {'id': STATUS_*, 'name': str}."""
-    mod = module()
+async def get_order_status(uid: str, provider: str | None = None, expected_amount=None) -> dict:
+    """Проверяет старый заказ независимо от текущего переключателя автооплаты."""
+    mod = module(provider)
     if mod is None:
         raise AutoPayDisabled("Автоматическая оплата временно отключена.")
+    if mod is platega:
+        return await platega.get_order_status(uid, expected_amount=expected_amount)
     return await mod.get_order_status(uid)
