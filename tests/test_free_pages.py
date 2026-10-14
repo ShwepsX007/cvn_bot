@@ -367,3 +367,28 @@ async def test_reminder_job_sends_telegram_anyio(monkeypatch):
     _FakeBot.sent = []
     await web_app.free_reminders_job()
     assert _FakeBot.sent == []
+
+
+def test_public_seo_robots_and_sitemap(client):
+    home = client.get("/")
+    assert home.status_code == 200
+    assert "AmneziaWG — бесплатный сервер и пробный период 24 часа" in home.text
+    assert 'type="application/ld+json"' in home.text
+    assert '"@type": "HowTo"' in home.text
+    assert "application/ld+json" in home.text
+
+    robots = client.get("/robots.txt")
+    assert robots.status_code == 200
+    assert "Sitemap:" in robots.text
+    assert "Disallow: /login" in robots.text
+    assert "Disallow: /free/config" in robots.text
+    assert "User-agent: Yandex" in robots.text
+    assert "Host:" in robots.text
+
+    sitemap = client.get("/sitemap.xml")
+    assert sitemap.status_code == 200
+    assert "/free" in sitemap.text
+    assert "/privacy" in sitemap.text
+    assert "/terms" in sitemap.text
+    assert "/login" not in sitemap.text
+    assert "/dashboard" not in sitemap.text

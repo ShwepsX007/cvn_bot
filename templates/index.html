@@ -12,16 +12,68 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#171c2b">
     <meta name="description" content="{{ og_description }}">
+    <meta name="keywords" content="{{ seo_keywords }}">
     <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">
     <link rel="canonical" href="{{ canonical_url }}">
     <meta property="og:type" content="website">
+    <meta property="og:locale" content="{{ og_locale }}">
     <meta property="og:title" content="{{ og_title }}">
     <meta property="og:description" content="{{ og_description }}">
     <meta property="og:url" content="{{ canonical_url }}">
     <meta property="og:image" content="{{ og_image }}">
+    <meta property="og:image:alt" content="Сервис AmneziaWG">
     <meta property="og:site_name" content="Сервис AmneziaWG">
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ og_title }}">
+    <meta name="twitter:description" content="{{ og_description }}">
+    <meta name="twitter:image" content="{{ og_image }}">
     <title>{{ page_title }}</title>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "name": "Сервис AmneziaWG",
+          "url": {{ site_url|tojson }},
+          "inLanguage": "ru-RU"
+        },
+        {
+          "@type": "Organization",
+          "name": "Сервис AmneziaWG",
+          "url": {{ site_url|tojson }},
+          "logo": {{ (site_url ~ "/static/apple-touch-icon.png")|tojson }}
+        },
+        {
+          "@type": "SoftwareApplication",
+          "name": "AmneziaWG",
+          "applicationCategory": "UtilitiesApplication",
+          "operatingSystem": "Android, iOS, Windows",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "RUB",
+            "availability": "https://schema.org/InStock"
+          }
+        },
+        {
+          "@type": "HowTo",
+          "name": "Как подключиться к сервису AmneziaWG",
+          "url": {{ (canonical_url ~ "#howto")|tojson }},
+          "inLanguage": "ru-RU",
+          "totalTime": "PT10M",
+          "step": [
+            {"@type": "HowToStep", "position": 1, "name": "Скачайте приложение AmneziaWG", "text": "Установите официальный клиент на Android, iOS или Windows."},
+            {"@type": "HowToStep", "position": 2, "name": "Зарегистрируйтесь", "text": "Создайте аккаунт на сайте по почте либо через Telegram-бота."},
+            {"@type": "HowToStep", "position": 3, "name": "Выберите и оплатите доступ", "text": "В личном кабинете оформите подписку либо пробный период."},
+            {"@type": "HowToStep", "position": 4, "name": "Скачайте файл конфигурации", "text": "Файл .conf лежит в разделе Мои подписки."},
+            {"@type": "HowToStep", "position": 5, "name": "Добавьте туннель", "text": "Откройте приложение, нажмите Добавить туннель и выберите скачанный файл."},
+            {"@type": "HowToStep", "position": 6, "name": "Включите переключатель", "text": "Готово — подключение настроено."}
+          ]
+        }
+      ]
+    }
+    </script>
 </head>
 <body>
 

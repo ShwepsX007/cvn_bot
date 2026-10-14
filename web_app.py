@@ -97,14 +97,20 @@ def _site_globals(request: Request = None) -> dict:
     # Канонический URL (без query)
     canonical = site_url + path
     # OG-описание и заголовок по умолчанию — переопределяются в ручках через context
-    title_suffix = "Сервис AmneziaWG"
+    title_suffix = "AmneziaWG — бесплатный сервер и пробный период 24 часа"
+    og_description = (
+        "Сервис AmneziaWG: бесплатный сервер, пробный период 24 часа и подписка. "
+        "Подключение за минуту на Android, iOS и Windows. Оплата картой и СБП."
+    )
     return {
         "site_url": site_url,
         "canonical_url": canonical,
         "og_title": title_suffix,
-        "og_description": "Сервис AmneziaWG: управление подпиской, пробный период и оплата онлайн.",
-        "og_image": f"{site_url}/static/apple-touch-icon.png",
+        "og_description": og_description,
+        "og_image": f"{site_url}/static/amnezia_premium_banner.png",
+        "og_locale": "ru_RU",
         "page_title": title_suffix,
+        "seo_keywords": "AmneziaWG, бесплатный сервер, пробный период, конфиг, Android, iOS, Windows",
         "site_banner_html": bot_db.get_setting("site_banner_html") or "",
         "analytics_html": bot_db.get_setting("analytics_html") or "",
         "admin_contact": bot_db.get_setting("admin_contact") or "@your_telegram_username",
@@ -312,9 +318,12 @@ async def read_root(request: Request):
             "request": request,
             "servers": servers,
             "tg_bot_url": tg_bot_url,
-            "page_title": "Сервис AmneziaWG",
-            "og_title": "Сервис AmneziaWG",
-            "og_description": "Управление доступом, пробный период и оплата онлайн.",
+            "page_title": "AmneziaWG — бесплатный сервер и пробный период 24 часа",
+            "og_title": "AmneziaWG — бесплатный сервер и пробный период 24 часа",
+            "og_description": (
+                "Сервис AmneziaWG: бесплатный сервер, пробный период 24 часа и подписка. "
+                "Подключение за минуту на Android, iOS и Windows. Оплата картой и СБП."
+            ),
         }
     )
 
@@ -508,6 +517,13 @@ async def free_vpn_page(request: Request):
     return templates.TemplateResponse(request=request, name="free.html", context={
         "request": request,
         "free_hours": int(bot_db.get_setting("free_hours") or 3),
+        "page_title": "Бесплатный сервер AmneziaWG — конфиг без регистрации",
+        "og_title": "Бесплатный сервер AmneziaWG — конфиг без регистрации",
+        "og_description": (
+            "Бесплатный доступ AmneziaWG без регистрации: получите конфиг, "
+            "импортируйте в приложение и продлевайте с той же страницы."
+        ),
+        "seo_keywords": "AmneziaWG, бесплатный сервер, бесплатный доступ, конфиг без регистрации",
     })
 
 @app.get("/free/config")
@@ -1475,23 +1491,37 @@ async def platega_webhook(request: Request):
 
 # ====================== SEO: robots.txt / sitemap.xml / healthz ======================
 
+_ROBOTS_DISALLOW = (
+    "Disallow: /admin/web/\n"
+    "Disallow: /web/\n"
+    "Disallow: /webhook/\n"
+    "Disallow: /download/\n"
+    "Disallow: /qr/\n"
+    "Disallow: /free/config\n"
+    "Disallow: /free/download/\n"
+    "Disallow: /free/qr/\n"
+    "Disallow: /auth/\n"
+    "Disallow: /login\n"
+    "Disallow: /dashboard\n"
+    "Disallow: /cabinet\n"
+)
+
+
 @app.get("/robots.txt", response_class=Response)
 async def robots_txt():
     site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+    host = site_url.split("://", 1)[-1]
     body = (
         "User-agent: *\n"
         "Allow: /\n"
-        "Disallow: /admin/web/\n"
-        "Disallow: /web/\n"
-        "Disallow: /webhook/\n"
-        "Disallow: /download/\n"
-        "Disallow: /qr/\n"
-        "Disallow: /free/download/\n"
-        "Disallow: /free/qr/\n"
-        "Disallow: /auth/\n"
-        "Disallow: /login\n"
-        "Disallow: /dashboard\n"
-        "Disallow: /cabinet\n"
+        + _ROBOTS_DISALLOW
+        + "\n"
+        "User-agent: Yandex\n"
+        "Allow: /\n"
+        + _ROBOTS_DISALLOW
+        + f"Host: {host}\n"
+        "Clean-param: error&msg&tab&utm_source&utm_medium&utm_campaign&utm_content&utm_term\n"
+        "\n"
         f"Sitemap: {site_url}/sitemap.xml\n"
     )
     return Response(content=body, media_type="text/plain; charset=utf-8")
@@ -1502,10 +1532,10 @@ async def sitemap_xml():
     site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
     now = datetime.utcnow().strftime("%Y-%m-%d")
     urls = [
-        ("",     "1.0", "daily"),
-        ("/free","0.9", "daily"),
-        ("/terms","0.5","monthly"),
-        ("/login","0.4","weekly"),
+        ("",        "1.0", "daily"),
+        ("/free",   "0.9", "daily"),
+        ("/terms",  "0.5", "monthly"),
+        ("/privacy","0.5", "monthly"),
     ]
     parts = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
