@@ -494,3 +494,118 @@ body {
   .topbar .btn { white-space: normal; line-height: 1.25; }
   .hero-section { padding: 42px 0 !important; }
 }
+
+/* ===== Homepage how-to (always expanded, hard to miss) ===== */
+.howto-section { margin-top: -8px; }
+.howto-banner {
+  background:
+    radial-gradient(900px 280px at 0% 0%, rgba(45,123,255,.22), transparent 55%),
+    radial-gradient(700px 240px at 100% 100%, rgba(108,92,231,.18), transparent 55%),
+    var(--oc-panel);
+  border: 1px solid rgba(45,123,255,.35);
+  box-shadow: 0 0 0 4px rgba(45,123,255,.08), var(--oc-shadow);
+  border-radius: 20px;
+  padding: 28px 24px 24px;
+}
+.howto-head { text-align: center; margin-bottom: 22px; }
+.howto-badge {
+  display: inline-block;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  font-weight: 700;
+  font-size: .72rem;
+  letter-spacing: .08em;
+  padding: .38rem .75rem;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(239,68,68,.28);
+}
+.howto-title {
+  margin: 12px 0 8px;
+  font-size: clamp(1.35rem, 3vw, 1.85rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.howto-lead {
+  margin: 0 auto;
+  max-width: 560px;
+  color: var(--oc-text-dim);
+  font-size: 1rem;
+}
+.howto-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.howto-step {
+  display: flex;
+  gap: 14px;
+  background: var(--oc-bg-2);
+  border: 1px solid var(--oc-border-2);
+  border-radius: 16px;
+  padding: 16px 16px 18px;
+  min-height: 100%;
+}
+.howto-step-done {
+  border-color: rgba(34,197,94,.4);
+  background: linear-gradient(180deg, rgba(34,197,94,.1), var(--oc-bg-2));
+}
+.howto-num {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--oc-accent), var(--oc-accent-2));
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 14px rgba(45,123,255,.28);
+}
+.howto-step-done .howto-num {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 6px 14px rgba(34,197,94,.28);
+}
+.howto-body h3 {
+  margin: 4px 0 6px;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+.howto-body p {
+  margin: 0;
+  color: var(--oc-text-dim);
+  font-size: .92rem;
+  line-height: 1.45;
+}
+.howto-links {
+  margin-top: 10px;
+  font-size: .92rem;
+  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.howto-links a {
+  color: #93c5fd;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.howto-links a:hover { color: #fff; }
+.howto-sep { color: var(--oc-text-mut); }
+.howto-cta {
+  text-align: center;
+  margin-top: 22px;
+}
+@media (max-width: 991.98px) {
+  .howto-steps { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 575.98px) {
+  .howto-banner { padding: 20px 14px 16px; }
+  .howto-steps { grid-template-columns: 1fr; }
+  .howto-step { padding: 14px; }
+}

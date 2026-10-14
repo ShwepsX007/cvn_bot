@@ -58,7 +58,7 @@
             </p>
 
             <div class="d-flex gap-2 flex-wrap mt-4">
-                <a href="/free" class="btn btn-primary btn-lg rounded-pill px-4">🎁 Попробовать бесплатно</a>
+                <a href="/free" class="btn btn-primary btn-lg rounded-pill px-4">🎁 Бесплатный сервер</a>
                 <a href="{{ tg_bot_url or 'https://t.me/' }}" target="_blank" rel="noopener" class="btn btn-lg rounded-pill px-4" style="background:var(--oc-panel);color:var(--oc-text);border:1px solid var(--oc-border);">🤖 Открыть Telegram-бота</a>
                 <a href="/login" class="btn btn-lg rounded-pill px-4 btn-outline-secondary">🔐 Личный кабинет</a>
             </div>
@@ -84,10 +84,84 @@
                     <div class="sub">Без карты и регистрации</div>
                 </div>
                 <div class="d-grid gap-2 mt-3">
-                    <a href="/free" class="btn btn-primary rounded-pill">Получить конфиг сейчас</a>
+                    <a href="/login" class="btn btn-primary rounded-pill">Получить конфиг сейчас</a>
                     <a href="/login" class="btn rounded-pill" style="background:var(--oc-bg-2); color:var(--oc-text); border:1px solid var(--oc-border);">У меня уже есть подписка</a>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+</section>
+
+<!-- Инструкция: всегда развёрнута и заметна -->
+<section class="howto-section" id="howto">
+<div class="container pb-5">
+    <div class="howto-banner">
+        <div class="howto-head">
+            <span class="howto-badge">ОБЯЗАТЕЛЬНО ПРОЧИТАЙТЕ</span>
+            <h2 class="howto-title">Как подключиться — 6 простых шагов</h2>
+            <p class="howto-lead">Инструкция всегда открыта. Делайте по порядку — без этого конфиг не заработает.</p>
+        </div>
+
+        <ol class="howto-steps">
+            <li class="howto-step">
+                <div class="howto-num" aria-hidden="true">1</div>
+                <div class="howto-body">
+                    <h3>Скачайте приложение AmneziaWG</h3>
+                    <p>Установите официальный клиент на телефон или компьютер.</p>
+                    <div class="howto-links">
+                        <a href="https://play.google.com/store/apps/details?id=org.amnezia.awg" target="_blank" rel="noopener">Android</a>
+                        <span class="howto-sep">·</span>
+                        <a href="https://apps.apple.com/us/app/amneziawg/id6478942365" target="_blank" rel="noopener">iOS</a>
+                        <span class="howto-sep">·</span>
+                        <span>Windows — ссылка через поддержку</span>
+                    </div>
+                </div>
+            </li>
+            <li class="howto-step">
+                <div class="howto-num" aria-hidden="true">2</div>
+                <div class="howto-body">
+                    <h3>Зарегистрируйтесь</h3>
+                    <p>Создайте аккаунт на сайте по почте либо через Telegram-бота.</p>
+                    <div class="howto-links">
+                        <a href="/login">Регистрация / вход</a>
+                        <span class="howto-sep">·</span>
+                        <a href="{{ tg_bot_url or 'https://t.me/' }}" target="_blank" rel="noopener">Открыть бота</a>
+                    </div>
+                </div>
+            </li>
+            <li class="howto-step">
+                <div class="howto-num" aria-hidden="true">3</div>
+                <div class="howto-body">
+                    <h3>Выберите и оплатите доступ</h3>
+                    <p>В личном кабинете оформите подписку либо пробный период.</p>
+                </div>
+            </li>
+            <li class="howto-step">
+                <div class="howto-num" aria-hidden="true">4</div>
+                <div class="howto-body">
+                    <h3>Скачайте файл <code>.conf</code></h3>
+                    <p>Файл конфигурации лежит в разделе «Мои подписки» в личном кабинете.</p>
+                </div>
+            </li>
+            <li class="howto-step">
+                <div class="howto-num" aria-hidden="true">5</div>
+                <div class="howto-body">
+                    <h3>Добавьте туннель</h3>
+                    <p>Откройте AmneziaWG, нажмите «Добавить туннель» (➕) и выберите скачанный файл.</p>
+                </div>
+            </li>
+            <li class="howto-step howto-step-done">
+                <div class="howto-num" aria-hidden="true">6</div>
+                <div class="howto-body">
+                    <h3>Включите переключатель</h3>
+                    <p>Готово — подключение настроено. Интернет идёт через сервис.</p>
+                </div>
+            </li>
+        </ol>
+
+        <div class="howto-cta">
+            <a href="/login" class="btn btn-primary btn-lg rounded-pill px-4">Перейти в кабинет и начать</a>
         </div>
     </div>
 </div>
@@ -172,7 +246,7 @@
     <div class="card p-4" style="border-radius:16px;">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
             <h5 class="mb-0">🌍 Статус серверов</h5>
-            <a href="/free" class="btn btn-sm rounded-pill btn-primary">Попробовать бесплатно</a>
+            <a href="/free" class="btn btn-sm rounded-pill btn-primary">Бесплатный сервер</a>
         </div>
 
         {% if servers %}
