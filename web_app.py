@@ -107,7 +107,7 @@ def _site_globals(request: Request = None) -> dict:
         "canonical_url": canonical,
         "og_title": title_suffix,
         "og_description": og_description,
-        "og_image": f"{site_url}/static/amnezia_premium_banner.png",
+        "og_image": f"{site_url}/static/og-image.png",
         "og_locale": "ru_RU",
         "page_title": title_suffix,
         "seo_keywords": "AmneziaWG, бесплатный сервер, пробный период, конфиг, Android, iOS, Windows",
