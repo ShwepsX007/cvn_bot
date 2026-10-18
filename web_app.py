@@ -27,8 +27,9 @@ import emailauth
 import mailer
 import webauth
 import support
+import traffic
 
-from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, clean_inactive_users, autoupdate_node_containers
+from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, check_traffic_limits, clean_inactive_users, autoupdate_node_containers
 from user_handlers import issue_vpn_access, get_price_for_period, check_and_clean_expired, parse_date, reissue_config_for_active_sub
 from admin_panel import ADMIN_ID
 
@@ -244,6 +245,7 @@ async def startup_event():
     scheduler.add_job(check_expiring_1d, 'interval', minutes=30)
     scheduler.add_job(check_expiring_3d, 'interval', minutes=60)
     scheduler.add_job(check_expired_users, 'interval', minutes=15)
+    scheduler.add_job(check_traffic_limits, 'interval', minutes=15)
     scheduler.add_job(check_expired_free_accesses, 'interval', minutes=5)
     scheduler.add_job(free_reminders_job, 'interval', minutes=15)
     
@@ -949,6 +951,7 @@ async def dashboard(request: Request):
 
     active_subs = []
     servers_info = []
+    traffic_over = []  # подписки с исчерпанным лимитом трафика (баннер в кабинете)
 
     if accepted_tos:
         await check_and_clean_expired(tg_id)
@@ -956,6 +959,17 @@ async def dashboard(request: Request):
         subs_raw = bot_db.get_user_subs(tg_id) or []
         for sub in subs_raw:
             t_id, s_id, uname, exp_date_str, has_trial, active, is_trial, notif, last_exp = sub
+            tr = bot_db.get_user_traffic(tg_id, s_id)
+            # tr: (limit_gb, used_bytes, last_rx, last_tx, warned, over)
+            limit_bytes = traffic.resolve_limit_bytes(tr[0]) if tr else 0
+            used_bytes = (tr[1] or 0) if tr else 0
+            if tr and tr[5] == 1:
+                srv = bot_db.get_server_by_id(s_id)
+                traffic_over.append({
+                    "server_name": srv[2] if srv else f"Сервер {s_id}",
+                    "used_display": traffic.format_bytes(used_bytes),
+                    "limit_display": traffic.format_bytes(limit_bytes),
+                })
             if active == 1:
                 srv = bot_db.get_server_by_id(s_id)
                 srv_name = srv[2] if srv else f"Сервер {s_id}"
@@ -965,7 +979,15 @@ async def dashboard(request: Request):
                     "server_name": srv_name,
                     "expire": expire_date.strftime("%d.%m.%Y %H:%M"),
                     "is_trial": is_trial == 1,
-                    "has_config": bool(bot_db.get_user_config(tg_id, s_id))
+                    "has_config": bool(bot_db.get_user_config(tg_id, s_id)),
+                    # лимит трафика подписки: расход виден всегда, лимит - если задан
+                    "traffic": {
+                        "used_display": traffic.format_bytes(used_bytes),
+                        "limit_display": traffic.format_bytes(limit_bytes) if limit_bytes else "",
+                        "percent": min(100, round(used_bytes * 100 / limit_bytes)) if limit_bytes else 0,
+                        "limited": bool(limit_bytes),
+                        "warned": bool(tr and tr[4] == 1),
+                    },
                 })
 
         active_servers = bot_db.get_active_servers() or []
@@ -1034,6 +1056,8 @@ async def dashboard(request: Request):
             "is_admin": is_web_admin(tg_id),
             # переписка с поддержкой (своя у каждого пользователя)
             "support_messages": support_history,
+            # подписки с исчерпанным лимитом трафика - баннер «продлите доступ»
+            "traffic_over": traffic_over,
         }
     )
 

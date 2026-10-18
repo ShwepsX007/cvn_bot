@@ -89,6 +89,10 @@ def init_db():
         # Бесплатный доступ на сайте: срок конфига в часах и напоминание в TG за N минут
         ('free_hours', '3'),
         ('free_remind_minutes', '30'),
+        # Лимиты трафика: общий по умолчанию в ГБ (0 = без ограничений) и предупреждение
+        # пользователю при использовании N% лимита (0 = не предупреждать).
+        ('traffic_limit_gb', '0'),
+        ('traffic_warn_percent', '80'),
         # Рекламный HTML-баннер, вставляемый внизу всех публичных страниц сайта.
         # Пустая строка = «показывать стандартный баннер Amnezia Premium» (он уже в index.html).
         ('site_banner_html', ''),
@@ -194,6 +198,27 @@ def init_db():
         cursor.execute("ALTER TABLE users ADD COLUMN config_text TEXT")
     except sqlite3.OperationalError:
         pass
+
+    # === УЧЕТ И ЛИМИТЫ ТРАФИКА (per подписка: tg_id + server_id) ===
+    # traffic_limit_gb: NULL = общий по умолчанию (settings.traffic_limit_gb),
+    #   0 = без ограничений, >0 = лимит в гигабайтах.
+    # traffic_used_bytes - накопленный расход за текущий период оплаты (сбрасывается
+    #   при новой выдаче/продлении доступа). traffic_last_rx/tx - последние увиденные
+    #   счётчики awg для расчета дельты (переживают перезапуск интерфейса).
+    # traffic_warned - предупреждение о подходе к лимиту уже отправлено.
+    # traffic_over - лимит исчерпан, доступ отключен (показывается в кабинете).
+    for col_sql in (
+        "ALTER TABLE users ADD COLUMN traffic_limit_gb REAL",
+        "ALTER TABLE users ADD COLUMN traffic_used_bytes INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN traffic_last_rx INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN traffic_last_tx INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN traffic_warned INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN traffic_over INTEGER DEFAULT 0",
+    ):
+        try:
+            cursor.execute(col_sql)
+        except sqlite3.OperationalError:
+            pass
 
     # === УЧЕТНЫЕ ЗАПИСИ ПО ПОЧТЕ (независимая регистрация/вход на сайте) ===
     # Почтовая регистрация ПОЛНОСТЬЮ САМОСТОЯТЕЛЬНА: пользователю без Telegram
@@ -430,7 +455,14 @@ def get_unique_user_ids():
 def add_or_update_user(tg_id, server_id, username, days=0, hours=0, is_trial=False, config_text=None):
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT expire_date, has_used_trial FROM users WHERE tg_id=? AND server_id=?", (tg_id, server_id))
+    # Читаем ВСЕ «переживаемые» колонки заранее: INSERT OR REPLACE пересоздает строку,
+    # и неперечисленные в нем поля сбросятся в DEFAULT (личные лимиты трафика,
+    # накопленный расход, last_expired и config_text должны сохраняться).
+    cursor.execute(
+        "SELECT expire_date, has_used_trial, last_expired, config_text, "
+        "traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx, "
+        "traffic_warned, traffic_over FROM users WHERE tg_id=? AND server_id=?",
+        (tg_id, server_id))
     row = cursor.fetchone()
     
     now = datetime.now()
@@ -451,19 +483,27 @@ def add_or_update_user(tg_id, server_id, username, days=0, hours=0, is_trial=Fal
     trial_flag_historic = 1 if is_trial else (1 if (row and row[1] == 1) else 0)
     current_trial_flag = 1 if is_trial else 0
 
-    # config_text передается только при первой выдаче (после add_user.sh). При продлении
-    # (config_text=None) сохраняем ранее записанный конфиг через подзапрос, чтобы INSERT OR REPLACE
-    # его не затер - точно так же, как это уже сделано для last_expired.
-    if config_text is not None:
-        cursor.execute('''INSERT OR REPLACE INTO users (tg_id, server_id, username, expire_date, has_used_trial, active, is_trial, notified_3h, notified_1d, notified_3d, last_expired, config_text) 
-                          VALUES (?, ?, ?, ?, ?, 1, ?, 0, 0, 0, (SELECT last_expired FROM users WHERE tg_id=? AND server_id=?), ?)''', 
-                          (tg_id, server_id, username, new_expire, trial_flag_historic, current_trial_flag, tg_id, server_id, config_text))
-    else:
-        cursor.execute('''INSERT OR REPLACE INTO users (tg_id, server_id, username, expire_date, has_used_trial, active, is_trial, notified_3h, notified_1d, notified_3d, last_expired, config_text) 
-                          VALUES (?, ?, ?, ?, ?, 1, ?, 0, 0, 0, 
-                          (SELECT last_expired FROM users WHERE tg_id=? AND server_id=?), 
-                          (SELECT config_text FROM users WHERE tg_id=? AND server_id=?))''', 
-                          (tg_id, server_id, username, new_expire, trial_flag_historic, current_trial_flag, tg_id, server_id, tg_id, server_id))
+    # Сохраняем ранее записанные значения (или дефолты для новой строки).
+    prev_last_expired = row[2] if row else None
+    if config_text is None and row:
+        config_text = row[3]
+    prev_traffic_limit = row[4] if row else None
+    prev_used = (row[5] or 0) if row else 0
+    prev_last_rx = (row[6] or 0) if row else 0
+    prev_last_tx = (row[7] or 0) if row else 0
+    prev_warned = (row[8] or 0) if row else 0
+    prev_over = (row[9] or 0) if row else 0
+
+    cursor.execute('''INSERT OR REPLACE INTO users 
+                      (tg_id, server_id, username, expire_date, has_used_trial, active, is_trial,
+                       notified_3h, notified_1d, notified_3d, last_expired, config_text,
+                       traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx,
+                       traffic_warned, traffic_over) 
+                      VALUES (?, ?, ?, ?, ?, 1, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (tg_id, server_id, username, new_expire, trial_flag_historic, current_trial_flag,
+                    prev_last_expired, config_text,
+                    prev_traffic_limit, prev_used, prev_last_rx, prev_last_tx,
+                    prev_warned, prev_over))
     conn.commit()
     conn.close()
 
@@ -1324,3 +1364,131 @@ def delete_support_chat(tg_id):
     cursor.execute("DELETE FROM support_messages WHERE tg_id=?", (int(tg_id),))
     conn.commit()
     conn.close()
+
+# --- УЧЕТ И ЛИМИТЫ ТРАФИКА ---
+# Трафик считается по каждому пиру AmneziaWG (username = user_{tg_id}): скрипт
+# на ноде отдает счётчики rx/tx, здесь они накапливаются за текущий период оплаты.
+# Лимит: NULL у подписки = общий по умолчанию (settings.traffic_limit_gb),
+# 0 = без ограничений, >0 = гигабайты.
+
+def get_user_traffic(tg_id, server_id):
+    """Кортеж (traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx,
+    traffic_warned, traffic_over) или None, если подписки нет."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx, "
+        "traffic_warned, traffic_over FROM users WHERE tg_id=? AND server_id=?",
+        (int(tg_id), int(server_id)))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def set_user_traffic_limit(tg_id, server_id, limit_gb):
+    """Личный лимит подписки в ГБ. None = вернуться к общему по умолчанию."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET traffic_limit_gb=? WHERE tg_id=? AND server_id=?",
+                   (limit_gb, int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+
+def set_all_traffic_limits(limit_gb):
+    """Ставит личный лимит ВСЕМ подпискам сразу. None = сбросить личные лимиты
+    (все переходят на общий по умолчанию из настроек)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET traffic_limit_gb=?", (limit_gb,))
+    conn.commit()
+    conn.close()
+
+def reset_user_traffic(tg_id, server_id, full=False):
+    """Обнуляет накопленный расход и флаги (при оплате/продлении/новой выдаче).
+
+    full=True дополнительно сбрасывает последние счётчики сервера - используется
+    при перевыдаче конфига (пир пересоздается, счётчики awg начинаются с нуля).
+    При простом продлении счётчики сервера НЕ трогаем, чтобы старый накопленный
+    на сервере трафик не «переехал» в новый период.
+    """
+    conn = get_conn()
+    cursor = conn.cursor()
+    if full:
+        cursor.execute(
+            "UPDATE users SET traffic_used_bytes=0, traffic_last_rx=0, traffic_last_tx=0, "
+            "traffic_warned=0, traffic_over=0 WHERE tg_id=? AND server_id=?",
+            (int(tg_id), int(server_id)))
+    else:
+        cursor.execute(
+            "UPDATE users SET traffic_used_bytes=0, traffic_warned=0, traffic_over=0 "
+            "WHERE tg_id=? AND server_id=?",
+            (int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+
+def apply_user_traffic_counters(tg_id, server_id, rx, tx):
+    """Принимает текущие счётчики awg (байты) и добавляет дельту к накопленному
+    расходу. Умеет переживать сброс счётчиков (current < last) - тогда весь
+    текущий объем считается новым трафиком. Возвращает (used_bytes, delta_bytes)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT traffic_used_bytes, traffic_last_rx, traffic_last_tx FROM users "
+        "WHERE tg_id=? AND server_id=?",
+        (int(tg_id), int(server_id)))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return None, 0
+    used, last_rx, last_tx = (row[0] or 0), (row[1] or 0), (row[2] or 0)
+    delta_rx = rx if rx < last_rx else (rx - last_rx)
+    delta_tx = tx if tx < last_tx else (tx - last_tx)
+    used += delta_rx + delta_tx
+    cursor.execute(
+        "UPDATE users SET traffic_used_bytes=?, traffic_last_rx=?, traffic_last_tx=? "
+        "WHERE tg_id=? AND server_id=?",
+        (used, rx, tx, int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+    return used, delta_rx + delta_tx
+
+def mark_traffic_warned(tg_id, server_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET traffic_warned=1 WHERE tg_id=? AND server_id=?",
+                   (int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+
+def mark_traffic_over(tg_id, server_id):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET traffic_over=1 WHERE tg_id=? AND server_id=?",
+                   (int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+
+def get_active_subs_with_traffic():
+    """Активные подписки с трафиком для проверки лимитов:
+    (tg_id, server_id, username, traffic_limit_gb, traffic_used_bytes, traffic_warned)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT tg_id, server_id, username, traffic_limit_gb, traffic_used_bytes, traffic_warned "
+        "FROM users WHERE active=1")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_all_subs_with_traffic():
+    """Все подписки для админ-страницы «Трафик»:
+    (tg_id, server_id, username, expire_date, active, traffic_limit_gb,
+    traffic_used_bytes, traffic_warned, traffic_over)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT tg_id, server_id, username, expire_date, active, traffic_limit_gb, "
+        "traffic_used_bytes, traffic_warned, traffic_over FROM users "
+        "ORDER BY traffic_used_bytes DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows

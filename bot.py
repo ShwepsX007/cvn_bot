@@ -2,8 +2,11 @@ import asyncio
 import os
 import shlex
 from aiogram import Bot, Dispatcher
+from aiogram import html
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import database as db
 import ssh_manager as ssh
 
@@ -121,6 +124,91 @@ async def check_expired_users():
                     print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
             else:
                 print(f"❌ Ошибка отключения пользователя {username}: {result}")
+
+# --- ЛИМИТЫ ТРАФИКА ---
+# Периодически (см. web_app.py) сверяем реальный расход по каждому пиру с лимитами:
+#   - при использовании N% лимита (settings.traffic_warn_percent) - однократное
+#     предупреждение пользователю в Telegram (в кабинете прогресс виден всегда);
+#   - при исчерпании лимита - отключение как при истечении срока (пир удаляется),
+#     уведомления пользователю и админу; пользователь оплачивает заново и получает
+#     новый доступ со свежим лимитом и сроком.
+async def check_traffic_limits():
+    import traffic
+    try:
+        await traffic.sync_all()
+    except Exception as e:
+        print(f"⚠️ Ошибка синхронизации трафика: {e}")
+
+    try:
+        warn_percent = int(db.get_setting("traffic_warn_percent") or 0)
+    except (TypeError, ValueError):
+        warn_percent = 0
+
+    for tg_id, server_id, username, limit_gb, used_bytes, warned in db.get_active_subs_with_traffic():
+        limit_bytes = traffic.resolve_limit_bytes(limit_gb)
+        if not limit_bytes:
+            continue  # без лимита
+        used_bytes = used_bytes or 0
+        server = db.get_server_by_id(server_id)
+        srv_name = server[2] if server else f"ID {server_id}"
+
+        if used_bytes >= limit_bytes:
+            # ИСЧЕРПАНИЕ ЛИМИТА: отключаем как при истечении подписки
+            cmd = f"bash /root/remove_user.sh {shlex.quote(username)}"
+            result = await ssh.run_ssh_command(server[0] if server else "", server[1] if server else 2222, cmd)
+            if "Ошибка" in str(result):
+                print(f"❌ traffic: ошибка отключения {username}: {result}")
+                continue
+            db.deactivate_user(tg_id, server_id)
+            db.mark_traffic_over(tg_id, server_id)
+            used_txt = traffic.format_bytes(used_bytes)
+            limit_txt = traffic.format_bytes(limit_bytes)
+            if not db.is_virtual_tg_id(tg_id):
+                try:
+                    builder = InlineKeyboardBuilder()
+                    builder.add(InlineKeyboardButton(
+                        text="🛍 Продлить доступ",
+                        url=(db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")))
+                    await bot.send_message(
+                        tg_id,
+                        f"⚠️ <b>Лимит трафика исчерпан!</b>\n\n"
+                        f"Сервер: <b>{html.quote(srv_name)}</b>\n"
+                        f"Использовано: <b>{used_txt}</b> из <b>{limit_txt}</b>\n\n"
+                        f"Доступ отключен. Чтобы продолжить — оплатите подписку заново: "
+                        f"вы получите новый срок и свежий лимит трафика.",
+                        reply_markup=builder.as_markup(), parse_mode="HTML")
+                except Exception as _e:
+                    print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
+            try:
+                who = f"<code>{tg_id}</code>"
+                if db.is_virtual_tg_id(tg_id):
+                    _acc = db.get_email_account_by_virtual_tg(tg_id)
+                    who = f"📧 {html.quote(_acc[1])}" if _acc else who
+                    who += " (почтовый аккаунт, без Telegram)"
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"🔴 <b>Лимит трафика исчерпан!</b>\nПользователь {who} отключен от сервера "
+                    f"{html.quote(srv_name)} ({used_txt} из {limit_txt}).",
+                    parse_mode="HTML")
+            except Exception as _e:
+                print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
+            continue
+
+        # ПРЕДУПРЕЖДЕНИЕ (однократно за период оплаты)
+        if warn_percent > 0 and not warned and used_bytes >= limit_bytes * warn_percent / 100:
+            db.mark_traffic_warned(tg_id, server_id)
+            if not db.is_virtual_tg_id(tg_id):
+                try:
+                    await bot.send_message(
+                        tg_id,
+                        f"📊 <b>Трафик почти исчерпан</b>\n\n"
+                        f"Сервер: <b>{html.quote(srv_name)}</b>\n"
+                        f"Использовано: <b>{traffic.format_bytes(used_bytes)}</b> из "
+                        f"<b>{traffic.format_bytes(limit_bytes)}</b> ({warn_percent}%).\n\n"
+                        f"При исчерпании лимита доступ будет отключен — продлите подписку заранее.",
+                        parse_mode="HTML")
+                except Exception as _e:
+                    print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
 
 # --- АВТООБНОВЛЕНИЕ КОНТЕЙНЕРОВ AMNEZIAWG НА НОДАХ ---
 # Включается в админке: Настройки -> checkbox «Автообновление AWG-контейнера» (container_autoupdate=on).

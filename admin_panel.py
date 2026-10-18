@@ -48,8 +48,9 @@ def get_admin_keyboard():
     builder.add(InlineKeyboardButton(text="🎁 Выдать конфиг", callback_data="adm_issue_config"))
     builder.add(InlineKeyboardButton(text="🗑 Удалить юзера", callback_data="adm_ask_del_user"))
     builder.add(InlineKeyboardButton(text="📢 Рассылка", callback_data="adm_broadcast"))
+    builder.add(InlineKeyboardButton(text="📶 Трафик", callback_data="adm_traffic"))
     builder.add(InlineKeyboardButton(text="⚙️ Настройки бота", callback_data="adm_settings"))
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2)
     return builder.as_markup()
 
 @admin_router.message(Command("admin"))
@@ -429,6 +430,69 @@ async def send_broadcast(message: Message, state: FSMContext):
         except Exception: pass
     await message.answer(f"✅ Рассылка завершена. Успешно доставлено: {count} чел.")
     await state.clear()
+
+# --- ТРАФИК (обзор; полное управление - на сайте, раздел «Трафик») ---
+def _traffic_panel():
+    """Текст и кнопки панели трафика в Telegram-админке."""
+    import traffic as traffic_module
+    global_limit = db.get_setting("traffic_limit_gb") or "0"
+    try:
+        warn_percent = int(db.get_setting("traffic_warn_percent") or 0)
+    except (TypeError, ValueError):
+        warn_percent = 0
+
+    text = (
+        "📶 <b>ТРАФИК ПОЛЬЗОВАТЕЛЕЙ</b>\n\n"
+        f"Общий лимит по умолчанию: <b>{global_limit} ГБ</b> (0 = без ограничений)\n"
+        f"Предупреждение при использовании: <b>{warn_percent}%</b>\n\n"
+        "<b>Топ по расходу:</b>\n"
+    )
+    rows = db.get_all_subs_with_traffic() or []
+    if not rows:
+        text += "(подписок пока нет)\n"
+    for (tg_id, s_id, username, expire, active, limit_gb, used, warned, over) in rows[:10]:
+        limit_bytes = traffic_module.resolve_limit_bytes(limit_gb)
+        srv = db.get_server_by_id(s_id)
+        srv_name = srv[2] if srv else f"#{s_id}"
+        used_txt = traffic_module.format_bytes(used or 0)
+        if limit_bytes:
+            ratio = f"{used_txt} из {traffic_module.format_bytes(limit_bytes)}"
+        else:
+            ratio = f"{used_txt} (без лимита)"
+        flag = "⛔" if over else ("⚠️" if warned else ("🟢" if active == 1 else "⚪"))
+        text += f"{flag} <code>{tg_id}</code> {html.quote(srv_name)}: {ratio}\n"
+    text += "\nЛичные лимиты, лимит «ко всем сразу» и сброс счётчиков — на сайте в разделе «📶 Трафик»."
+
+    builder = InlineKeyboardBuilder()
+    builder.add(InlineKeyboardButton(text="🔄 Обновить счётчики", callback_data="adm_trf_sync"))
+    site_url = (db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
+    builder.add(InlineKeyboardButton(text="🌐 Управление на сайте", url=f"{site_url}/admin/web/traffic"))
+    builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data="adm_menu"))
+    builder.adjust(1)
+    return text, builder.as_markup()
+
+
+@admin_router.callback_query(F.data == "adm_traffic")
+async def show_traffic(callback: CallbackQuery):
+    text, markup = _traffic_panel()
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    await callback.answer()
+
+@admin_router.callback_query(F.data == "adm_trf_sync")
+async def traffic_sync(callback: CallbackQuery):
+    import traffic as traffic_module
+    await callback.answer("Синхронизирую счётчики с нод...")
+    try:
+        updated = await traffic_module.sync_all()
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка синхронизации: {html.quote(str(e))}")
+        return
+    await callback.message.answer(f"✅ Синхронизация завершена: обновлено записей — {updated}.")
+    text, markup = _traffic_panel()
+    try:
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    except Exception:
+        pass  # сообщение не изменилось / слишком старое - не критично
 
 # --- НАСТРОЙКИ БОТА ---
 @admin_router.callback_query(F.data == "adm_settings")

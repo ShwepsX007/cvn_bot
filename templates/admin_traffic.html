@@ -1,0 +1,113 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4 mb-4">
+    <h5 class="fw-bold mb-1">📶 Лимиты трафика</h5>
+    <small class="text-muted d-block mb-3">
+        Трафик считается по каждому пользователю отдельно (по пиру AmneziaWG) и накапливается за текущий период оплаты.
+        При исчерпании лимита доступ отключается (как после истечения срока) — пользователь оплачивает заново и получает
+        новый срок и свежий лимит. Лимит действует вместе со сроком подписки.
+    </small>
+
+    <form method="post" action="/admin/web/traffic/settings" class="row g-2 align-items-end mb-3">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Общий лимит по умолчанию (ГБ, 0 = без ограничений)</label>
+            <input type="number" step="any" min="0" name="global_limit_gb" class="form-control" value="{{ global_limit }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Предупреждать пользователя при использовании (%)</label>
+            <input type="number" min="0" max="100" name="warn_percent" class="form-control" value="{{ warn_percent }}">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-primary w-100 rounded-pill">Сохранить</button>
+        </div>
+    </form>
+
+    <form method="post" action="/admin/web/traffic/apply-all" class="row g-2 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Лимит для ВСЕХ подписок сразу (ГБ, 0 = без лимита)</label>
+            <input type="number" step="any" min="0" name="limit_gb" class="form-control" placeholder="напр. 50">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-success w-100 rounded-pill">Применить ко всем</button>
+        </div>
+    </form>
+    <div class="d-flex gap-2 flex-wrap mt-2">
+        <form method="post" action="/admin/web/traffic/clear-all" class="d-inline"
+              onsubmit="return confirm('Сбросить личные лимиты у ВСЕХ подписок? Они перейдут на общий лимит по умолчанию.');">
+            <button class="btn btn-outline-secondary btn-sm rounded-pill">🧹 Сбросить личные лимиты (к общему)</button>
+        </form>
+        <form method="post" action="/admin/web/traffic/sync" class="d-inline">
+            <button class="btn btn-outline-primary btn-sm rounded-pill">🔄 Синхронизировать счётчики сейчас</button>
+        </form>
+    </div>
+</div>
+
+<div class="card card-custom p-4">
+    <h5 class="fw-bold mb-3">📊 Расход по подпискам ({{ rows|length }})</h5>
+    {% if rows %}
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Пользователь</th>
+                    <th>Сервер</th>
+                    <th>Трафик</th>
+                    <th>Лимит</th>
+                    <th>Статус</th>
+                    <th style="width:250px">Управление</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in rows %}
+                <tr>
+                    <td>
+                        <b>{{ r.name }}</b>
+                        {% if r.is_virtual %}<span class="badge bg-secondary ms-1">без Telegram</span>{% endif %}
+                        <br><small class="text-muted">ID: <code>{{ r.tg_id }}</code>{% if r.email %} · 📧 {{ r.email }}{% endif %}</small>
+                    </td>
+                    <td>
+                        {{ r.server_name }}
+                        <br><small class="text-muted">{{ 'до ' ~ r.expire if r.active else 'отключена' }}</small>
+                    </td>
+                    <td style="min-width:160px">
+                        <b>{{ r.used_display }}</b>
+                        <div class="progress progress-sm mt-1" style="height:8px; min-width:120px;">
+                            <div class="progress-bar {{ 'bg-danger' if r.over else ('bg-warning' if r.warned else 'bg-success') }}"
+                                 style="width: {{ r.percent if r.limit_display != 'без лимита' else 0 }}%"></div>
+                        </div>
+                    </td>
+                    <td><small>{{ r.limit_display }}</small></td>
+                    <td>
+                        {% if r.over %}<span class="badge bg-danger">⛔ лимит исчерпан</span>
+                        {% elif r.warned %}<span class="badge bg-warning text-dark">⚠️ близко к лимиту</span>
+                        {% elif r.active %}<span class="badge bg-success">активна</span>
+                        {% else %}<span class="badge bg-secondary">отключена</span>{% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="/admin/web/traffic/limit" class="d-flex gap-1 mb-1">
+                            <input type="hidden" name="tg_id" value="{{ r.tg_id }}">
+                            <input type="hidden" name="server_id" value="{{ r.server_id }}">
+                            <input type="number" step="any" min="0" name="limit_gb" class="form-control form-control-sm"
+                                   style="width:110px" placeholder="ГБ (пусто=общий)"
+                                   value="{{ '' if r.limit_gb is none else r.limit_gb }}">
+                            <button class="btn btn-outline-primary btn-sm rounded-pill">Задать</button>
+                        </form>
+                        <form method="post" action="/admin/web/traffic/reset" class="d-inline"
+                              onsubmit="return confirm('Обнулить счётчик трафика пользователя {{ r.tg_id }} на сервере {{ r.server_id }}?');">
+                            <input type="hidden" name="tg_id" value="{{ r.tg_id }}">
+                            <input type="hidden" name="server_id" value="{{ r.server_id }}">
+                            <button class="btn btn-outline-secondary btn-sm rounded-pill">↺ Сбросить счётчик</button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">Подписок пока нет.</p>
+    {% endif %}
+</div>
+
+{% endblock %}

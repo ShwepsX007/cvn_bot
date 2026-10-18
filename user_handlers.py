@@ -20,6 +20,7 @@ import qrgen
 import emailauth
 import mailer
 import support as support_service
+import traffic as traffic_module
 from config import ADMIN_ID
 
 user_router = Router()
@@ -383,6 +384,15 @@ async def show_profile(callback: CallbackQuery):
             text += f"🖥 <b>Сервер: {srv_name}</b>\n"
             text += f"📅 Активно до: {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
             text += f"⏳ Осталось: {days_left} дн. ({hours_left} ч.)\n"
+            # Лимит трафика подписки (0/None = без ограничений)
+            tr = db.get_user_traffic(callback.from_user.id, s_id)
+            if tr:
+                limit_bytes = traffic_module.resolve_limit_bytes(tr[0])
+                used_bytes = tr[1] or 0
+                if limit_bytes:
+                    text += f"📊 Трафик: {traffic_module.format_bytes(used_bytes)} из {traffic_module.format_bytes(limit_bytes)}\n"
+                elif used_bytes:
+                    text += f"📊 Трафик: {traffic_module.format_bytes(used_bytes)} (без ограничений)\n"
             if is_trial == 1:
                 text += "🎁 <i>Пробный период</i>\n"
             text += "\n"
@@ -458,7 +468,7 @@ async def buy_menu(callback: CallbackQuery):
     p7 = sp7 if sp7 is not None else db.get_setting("price_7d")
     p30 = sp30 if sp30 is not None else db.get_setting("price_30d")
     
-    text = f"🛍 <b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n📍 Локация: {srv_name}\n\nВыберите желаемый период использования:"
+    text = f"🛍 <b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n📍 Локация: {srv_name}\n\nВыберите желаемый период использования:\n\n<i>Доступ действует на выбранный срок и в пределах лимита трафика — что закончится раньше. После оплаты вы получаете новый срок и свежий лимит.</i>"
     
     builder = InlineKeyboardBuilder()
     if can_take_trial:
@@ -687,7 +697,10 @@ async def show_help(callback: CallbackQuery):
         "💻 Для Windows получите ссылку на приложение через Поддержку.\n\n"
         "2️⃣ <b>Сохраните файл конфигурации</b> <code>.conf</code>, который бот прислал вам после оплаты или оформления пробного периода.\n\n"
         "3️⃣ Откройте приложение <b>AmneziaWG</b>, нажмите кнопку <b>«Добавить туннель»</b> (или знак ➕) и выберите скачанный файл.\n\n"
-        "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍"
+        "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍\n\n"
+        "📶 <b>О подписке:</b> доступ действует на срок тарифа и в пределах лимита трафика — "
+        "что закончится раньше. Текущий расход и лимит видны в «👤 Мой профиль» и в личном кабинете на сайте. "
+        "Когда срок или лимит подходит к концу, мы предупредим; для продолжения просто продлите подписку."
     )
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
@@ -842,6 +855,10 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
         elif period == "7d": db.add_or_update_user(tg_id, server_id, username, days=7, is_trial=False)
         elif period == "30d": db.add_or_update_user(tg_id, server_id, username, days=30, is_trial=False)
 
+        # Новый период оплаты = свежий лимит трафика (счётчики awg на сервере не
+        # трогаем - накопленный до продления расход не переедет в новый период).
+        db.reset_user_traffic(tg_id, server_id)
+
         try:
             await bot.send_message(
                 tg_id, 
@@ -867,6 +884,10 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
     elif period == "1d": db.add_or_update_user(tg_id, server_id, username, days=1, is_trial=False, config_text=config_text)
     elif period == "7d": db.add_or_update_user(tg_id, server_id, username, days=7, is_trial=False, config_text=config_text)
     elif period == "30d": db.add_or_update_user(tg_id, server_id, username, days=30, is_trial=False, config_text=config_text)
+
+    # Пир пересоздан (новые ключи, счётчики awg с нуля) - новый период оплаты
+    # начинается со свежего лимита трафика и чистых счётчиков.
+    db.reset_user_traffic(tg_id, server_id, full=True)
 
     config_file = BufferedInputFile(config_text.encode('utf-8'), filename=f"ID{server_id}AWG.conf")
     caption = (

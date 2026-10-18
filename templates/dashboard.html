@@ -113,6 +113,18 @@
     </div>
     {% endif %}
 
+    <!-- ===================== БАННЕР: ЛИМИТ ТРАФИКА ИСЧЕРПАН ===================== -->
+    {% for t in traffic_over %}
+    <div class="alert alert-danger rounded-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            ⚠️ <b>Лимит трафика исчерпан</b> — сервер «{{ t.server_name }}»:
+            использовано {{ t.used_display }} из {{ t.limit_display }}. Доступ отключен.
+            Чтобы продолжить — оплатите подписку заново (новый срок и свежий лимит трафика).
+        </div>
+        <a href="#buy-section" class="btn btn-danger btn-sm rounded-pill">🛍 Продлить доступ</a>
+    </div>
+    {% endfor %}
+
     <!-- ===================== МОИ ПОДПИСКИ ===================== -->
     <div class="card card-custom p-4 mb-4">
         <h5 class="fw-bold mb-3">👤 Мои подписки</h5>
@@ -125,6 +137,19 @@
                         {% if sub.is_trial %}<span class="badge badge-trial ms-1">Пробный</span>{% endif %}
                         <br>
                         <small class="text-muted">Активно до: {{ sub.expire }}</small>
+                        {% if sub.traffic %}
+                        <br>
+                        <small class="text-muted">
+                            📊 Трафик: <b>{{ sub.traffic.used_display }}</b>
+                            {% if sub.traffic.limited %} из {{ sub.traffic.limit_display }}{% endif %}
+                        </small>
+                        {% if sub.traffic.limited %}
+                        <div class="progress mt-1" style="height:6px; max-width:260px;">
+                            <div class="progress-bar {{ 'bg-danger' if sub.traffic.percent >= 100 else ('bg-warning' if sub.traffic.warned else 'bg-success') }}"
+                                 style="width: {{ sub.traffic.percent }}%"></div>
+                        </div>
+                        {% endif %}
+                        {% endif %}
                     </div>
                     {% if sub.has_config %}
                         <div class="d-flex gap-2 flex-wrap justify-content-end">
@@ -181,7 +206,7 @@
     </div>
 
     <!-- ===================== КУПИТЬ / ПРОДЛИТЬ ===================== -->
-    <div class="card card-custom p-4 mb-4">
+    <div class="card card-custom p-4 mb-4" id="buy-section">
         <h5 class="fw-bold mb-3">🛍 Оформить / продлить доступ</h5>
         {% if servers %}
             {% for srv in servers %}
@@ -234,6 +259,7 @@
                 <div class="accordion-body">
                     <p>На серверах действует лимит подключений, чтобы распределять доступ между пользователями.</p>
                     <p><b>Как это работает:</b> вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и сервис моментально выдает конфигурационный файл.</p>
+                    <p><b>Срок и трафик:</b> доступ выдается на срок тарифа и с лимитом трафика — что закончится раньше. Трафик каждого пользователя считается отдельно, текущий расход виден в разделе «Мои подписки». При использовании лимита трафика доступ отключается — как и после истечения срока; чтобы продолжить, оплатите подписку заново (вы получите новый срок и свежий лимит). Уточнить действующий лимит можно в поддержке.</p>
                     <p><b>Поддерживаемые платформы:</b> Android, iOS и Windows. Для подключения используется приложение AmneziaWG.</p>
                     <p><b>Выделенный личный сервер:</b> для заказа обратитесь в поддержку ниже.</p>
                 </div>

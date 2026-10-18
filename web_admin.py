@@ -24,6 +24,7 @@ import mailer
 import payments
 import platega
 import support as support_service
+import traffic as traffic_module
 from config import ADMIN_ID
 
 router = APIRouter(prefix="/admin/web", tags=["web-admin"])
@@ -62,6 +63,8 @@ SETTING_LABELS = {
     "node_update_report": "Отчет автообновления (служебное)",
     "free_hours": "Бесплатный доступ: срок конфига (часов)",
     "free_remind_minutes": "Бесплатный доступ: напоминание в TG за (мин)",
+    "traffic_limit_gb": "Трафик: общий лимит по умолчанию (ГБ, 0 = без ограничений)",
+    "traffic_warn_percent": "Трафик: предупреждать при использовании (%)",
     "site_banner_html": "Пользовательский рекламный HTML (не отображается на публичных страницах до проверки)",
     "analytics_html": "HTML-код аналитики/счётчика (вставляется перед </body> всех страниц)",
 }
@@ -584,6 +587,141 @@ async def admin_chat_delete(request: Request, tg_id: int):
         return RedirectResponse(url="/login")
     db.delete_support_chat(tg_id)
     return _back("/admin/web/chats", msg=f"Чат пользователя {tg_id} удален.")
+
+
+# ==================== ТРАФИК ====================
+# Управление лимитами трафика: общий по умолчанию (для всех), личные лимиты
+# по каждой подписке, сброс счетчиков и принудительная синхронизация с нод.
+
+def _parse_limit_gb(raw):
+    """'10', '10,5', '0' -> число (0 = без лимита); пустая строка -> None (общий)."""
+    raw = (raw or "").strip().replace(",", ".")
+    if raw == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError("Лимит должен быть числом (гигабайты), 0 = без ограничений")
+    if value < 0:
+        raise ValueError("Лимит не может быть отрицательным")
+    return value
+
+
+@router.get("/traffic")
+async def admin_traffic(request: Request):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    global_limit = db.get_setting("traffic_limit_gb") or "0"
+    warn_percent = db.get_setting("traffic_warn_percent") or "80"
+
+    rows = []
+    for (tg_id, s_id, username, expire, active, limit_gb, used, warned, over) in db.get_all_subs_with_traffic():
+        srv = db.get_server_by_id(s_id)
+        limit_bytes = traffic_module.resolve_limit_bytes(limit_gb)
+        used = used or 0
+        percent = min(100, round(used * 100 / limit_bytes)) if limit_bytes else 0
+        info = _chat_user_info(tg_id)
+        rows.append({
+            "tg_id": tg_id,
+            "server_id": s_id,
+            "server_name": srv[2] if srv else f"#{s_id}",
+            "name": info["name"],
+            "email": info["email"],
+            "is_virtual": info["is_virtual"],
+            "expire": _fmt_ts(expire)[:16] if expire else "—",
+            "active": active == 1,
+            # None = общий по умолчанию, 0 = без лимита, >0 = ГБ
+            "limit_gb": limit_gb,
+            "limit_display": ("без лимита" if not limit_bytes
+                              else (f"общий ({global_limit} ГБ)" if limit_gb is None
+                                    else f"{limit_gb:g} ГБ")),
+            "used_display": traffic_module.format_bytes(used),
+            "percent": percent,
+            "warned": warned == 1,
+            "over": over == 1,
+        })
+    return templates.TemplateResponse(request=request, name="admin_traffic.html", context=_ctx(
+        request, "traffic",
+        rows=rows, global_limit=global_limit, warn_percent=warn_percent,
+    ))
+
+
+@router.post("/traffic/settings")
+async def admin_traffic_settings(request: Request,
+                                 global_limit_gb: str = Form("0"),
+                                 warn_percent: str = Form("0")):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    try:
+        limit = _parse_limit_gb(global_limit_gb)
+        warn = int((warn_percent or "0").strip().replace(",", "."))
+        if warn < 0 or warn > 100:
+            raise ValueError("Процент предупреждения — от 0 до 100")
+    except ValueError as e:
+        return _back("/admin/web/traffic", error=str(e))
+    db.update_settings({
+        "traffic_limit_gb": "0" if limit in (None, 0) else f"{limit:g}",
+        "traffic_warn_percent": str(warn),
+    })
+    return _back("/admin/web/traffic", msg="Общие настройки трафика сохранены.")
+
+
+@router.post("/traffic/limit")
+async def admin_traffic_set_limit(request: Request, tg_id: int = Form(...),
+                                  server_id: int = Form(...), limit_gb: str = Form("")):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    try:
+        limit = _parse_limit_gb(limit_gb)
+    except ValueError as e:
+        return _back("/admin/web/traffic", error=str(e))
+    if not db.get_user_traffic(tg_id, server_id):
+        return _back("/admin/web/traffic", error="Подписка не найдена.")
+    db.set_user_traffic_limit(tg_id, server_id, limit)
+    desc = "общий по умолчанию" if limit is None else ("без лимита" if not limit else f"{limit:g} ГБ")
+    return _back("/admin/web/traffic", msg=f"Лимит трафика для {tg_id} (сервер {server_id}): {desc}.")
+
+
+@router.post("/traffic/reset")
+async def admin_traffic_reset(request: Request, tg_id: int = Form(...), server_id: int = Form(...)):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    db.reset_user_traffic(tg_id, server_id, full=True)
+    return _back("/admin/web/traffic", msg=f"Счётчик трафика пользователя {tg_id} (сервер {server_id}) обнулён.")
+
+
+@router.post("/traffic/apply-all")
+async def admin_traffic_apply_all(request: Request, limit_gb: str = Form("")):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    try:
+        limit = _parse_limit_gb(limit_gb)
+    except ValueError as e:
+        return _back("/admin/web/traffic", error=str(e))
+    if limit is None:
+        return _back("/admin/web/traffic", error="Укажите лимит для применения ко всем (0 = без лимита).")
+    db.set_all_traffic_limits(limit)
+    desc = "без лимита" if not limit else f"{limit:g} ГБ"
+    return _back("/admin/web/traffic", msg=f"Лимит {desc} установлен для ВСЕХ подписок.")
+
+
+@router.post("/traffic/clear-all")
+async def admin_traffic_clear_all(request: Request):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    db.set_all_traffic_limits(None)
+    return _back("/admin/web/traffic", msg="Личные лимиты сброшены: все подписки используют общий по умолчанию.")
+
+
+@router.post("/traffic/sync")
+async def admin_traffic_sync(request: Request):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    try:
+        updated = await traffic_module.sync_all()
+    except Exception as e:
+        return _back("/admin/web/traffic", error=f"Ошибка синхронизации: {e}")
+    return _back("/admin/web/traffic", msg=f"Синхронизация завершена: обновлено записей — {updated}.")
 
 
 # ==================== НАСТРОЙКИ ====================
