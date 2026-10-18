@@ -242,9 +242,6 @@ async def admin_user_message_send(request: Request, tg_id: int = Form(...), text
         return _back(f"/admin/web/users/message/{tg_id}", error="Пустое сообщение.")
 
     sender_name = "Администратор"
-    profile = db.get_user_profile(admin_tg)
-    if profile and profile[0]:
-        sender_name = f"Администратор ({profile[0]})"
 
     from bot import bot
     delivered, note = await support_service.reply_and_deliver(
@@ -608,9 +605,6 @@ async def admin_chat_reply(request: Request, tg_id: int, text: str = Form(...)):
         return _back(f"/admin/web/chats/{tg_id}", error="Пустое сообщение.")
 
     sender_name = "Администратор"
-    profile = db.get_user_profile(admin_tg)
-    if profile and profile[0]:
-        sender_name = f"Администратор ({profile[0]})"
 
     # Сохраняем в чате всегда; в Telegram дублируем по возможности.
     from bot import bot

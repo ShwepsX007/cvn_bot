@@ -19,10 +19,10 @@
         .price-btn { min-width: 150px; }
         .badge-trial { background: #ffc107; color: #333; }
         .support-history { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
-        .support-msg { max-width: 85%; border-radius: 14px; padding: 8px 12px; background: #eef1f4; }
-        .support-msg-user { align-self: flex-end; background: #d7e7ff; }
-        .support-msg-admin { align-self: flex-start; background: #e6f6e6; }
-        .support-msg-meta { font-size: .72rem; opacity: .7; margin-bottom: 2px; }
+        .support-msg { max-width: 85%; border-radius: 14px; padding: 10px 14px; color: var(--oc-text, #e9ecf3); }
+        .support-msg-user { align-self: flex-end; background: var(--oc-accent, #2d7bff); color: #fff; }
+        .support-msg-admin { align-self: flex-start; background: #2a3350; border: 1px solid var(--oc-border-2, rgba(255,255,255,.09)); }
+        .support-msg-meta { font-size: .72rem; opacity: .75; margin-bottom: 2px; }
         .support-msg-text { white-space: pre-wrap; word-break: break-word; }
     </style>
     <link rel="stylesheet" href="/static/app.css">
@@ -275,7 +275,7 @@
                     <div id="supportHistory" class="support-history mb-2">
                         {% for m in support_messages %}
                         <div class="support-msg {% if m.sender == 'user' %}support-msg-user{% else %}support-msg-admin{% endif %}">
-                            <div class="support-msg-meta">{{ m.sender_name }} · {{ m.created_at }}</div>
+                            <div class="support-msg-meta">{% if m.sender == 'user' %}{{ m.sender_name or 'Вы' }}{% else %}Администратор{% endif %} · {{ m.created_at }}</div>
                             <div class="support-msg-text">{{ m.text }}</div>
                         </div>
                         {% else %}
@@ -538,7 +538,7 @@ async function linkEmail() {
 
 function supportMsgHtml(m) {
     const side = m.sender === 'user' ? 'support-msg-user' : 'support-msg-admin';
-    const name = escapeHtml(m.sender_name || (m.sender === 'user' ? 'Вы' : 'Поддержка'));
+    const name = escapeHtml(m.sender === 'user' ? (m.sender_name || 'Вы') : 'Администратор');
     const when = escapeHtml(m.created_at || '');
     const text = escapeHtml(m.text || '');
     return `<div class="support-msg ${side}"><div class="support-msg-meta">${name} · ${when}</div>` +

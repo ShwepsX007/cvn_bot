@@ -29,7 +29,7 @@
         {% for m in messages %}
         <div class="chat-msg {% if m.sender == 'user' %}chat-msg-user{% else %}chat-msg-admin{% endif %}">
             <div class="chat-msg-meta">
-                {% if m.sender == 'user' %}🧑 Клиент{% else %}👨‍💻 {{ m.sender_name or 'Администратор' }}{% endif %}
+                {% if m.sender == 'user' %}🧑 Клиент{% else %}👨‍💻 Администратор{% endif %}
                 · {{ m.created_at }}
             </div>
             <div class="chat-msg-text">{{ m.text }}</div>
@@ -54,10 +54,10 @@
 
 <style>
     .chat-thread { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
-    .chat-msg { max-width: 80%; border-radius: 14px; padding: 8px 12px; background: #eef1f4; }
-    .chat-msg-user { align-self: flex-start; background: #e7e9ee; }
-    .chat-msg-admin { align-self: flex-end; background: #d7e7ff; }
-    .chat-msg-meta { font-size: .72rem; opacity: .7; margin-bottom: 2px; }
+    .chat-msg { max-width: 80%; border-radius: 14px; padding: 10px 14px; color: var(--oc-text, #e9ecf3); }
+    .chat-msg-user { align-self: flex-start; background: #2a3350; border: 1px solid var(--oc-border-2, rgba(255,255,255,.09)); }
+    .chat-msg-admin { align-self: flex-end; background: var(--oc-accent, #2d7bff); color: #fff; }
+    .chat-msg-meta { font-size: .72rem; opacity: .75; margin-bottom: 2px; }
     .chat-msg-text { white-space: pre-wrap; word-break: break-word; }
 </style>
 
