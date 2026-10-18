@@ -56,9 +56,10 @@ def save_admin_reply(tg_id, text, sender_name="Администратор"):
     return db.add_support_message(tg_id, ADMIN, text, sender_name=sender_name)
 
 
-async def deliver_to_user(bot, tg_id, text):
+async def deliver_to_user(bot, tg_id, text, headline="Ответ поддержки"):
     """Дублирует ответ пользователю в Telegram (best effort).
 
+    headline - заголовок сообщения («Ответ поддержки», «Сообщение от администратора»).
     Возвращает (доставлено: bool, пояснение: str). Для пользователей без
     Telegram (виртуальный ID) доставка не пытается выполниться.
     """
@@ -67,21 +68,21 @@ async def deliver_to_user(bot, tg_id, text):
     try:
         await bot.send_message(
             tg_id,
-            f"👨‍💻 <b>Ответ поддержки:</b>\n\n{tg_html.quote(text)}",
+            f"👨‍💻 <b>{headline}:</b>\n\n{tg_html.quote(text)}",
             parse_mode="HTML")
         return True, ""
     except Exception as e:
         return False, f"{e}"
 
 
-async def reply_and_deliver(bot, tg_id, text, sender_name="Администратор"):
-    """Ответ администратора: сохранить в чате + попытаться доставить в Telegram.
+async def reply_and_deliver(bot, tg_id, text, sender_name="Администратор", headline="Ответ поддержки"):
+    """Ответ/сообщение администратора: сохранить в чате + попытаться доставить в Telegram.
 
-    Возвращает (delivered: bool, note: str). Ответ сохраняется ВСЕГДА, даже если
+    Возвращает (delivered: bool, note: str). Сообщение сохраняется ВСЕГДА, даже если
     Telegram недоступен - пользователь увидит его на сайте.
     """
     save_admin_reply(tg_id, text, sender_name=sender_name)
-    delivered, note = await deliver_to_user(bot, tg_id, text)
+    delivered, note = await deliver_to_user(bot, tg_id, text, headline=headline)
     return delivered, note
 
 

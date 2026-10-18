@@ -93,6 +93,9 @@ def init_db():
         # пользователю при использовании N% лимита (0 = не предупреждать).
         ('traffic_limit_gb', '0'),
         ('traffic_warn_percent', '80'),
+        # Сколько дней хранить конфиги/строки отключенных пользователей перед
+        # автоматической очисткой (0 = хранить, пока пользователь числится в базе).
+        ('inactive_cleanup_days', '30'),
         # Рекламный HTML-баннер, вставляемый внизу всех публичных страниц сайта.
         # Пустая строка = «показывать стандартный баннер Amnezia Premium» (он уже в index.html).
         ('site_banner_html', ''),
@@ -1271,9 +1274,18 @@ def free_mark_notified(access_id):
 
 # --- Текущие триал-страницы сайта (старый API получения 1-часового конфига) ---
 def get_inactive_users_30d():
+    """Отключенные пользователи, которых пора вычистить вместе с конфигами.
+    Срок хранения - настройка inactive_cleanup_days (0 = хранить всегда, пока
+    пользователь числится в базе)."""
+    try:
+        days = int(get_setting("inactive_cleanup_days") or 30)
+    except (TypeError, ValueError):
+        days = 30
+    if days <= 0:
+        return []
     conn = get_conn()
     cursor = conn.cursor()
-    time_limit = datetime.now() - timedelta(days=30)
+    time_limit = datetime.now() - timedelta(days=days)
     cursor.execute("SELECT tg_id, server_id, username FROM users WHERE active=0 AND last_expired < ?", (time_limit,))
     users = cursor.fetchall()
     conn.close()

@@ -1,0 +1,64 @@
+{% extends "admin_base.html" %}
+{% block content %}
+
+<div class="card card-custom p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+            <h5 class="fw-bold mb-1">✉️ Сообщение пользователю</h5>
+            <small class="text-muted">
+                <b>{{ user.name }}</b>
+                {% if user.is_virtual %}<span class="badge bg-secondary ms-1">без Telegram</span>{% endif %}
+                · ID: <code>{{ user.tg_id }}</code>
+                {% if user.email %} · 📧 {{ user.email }}{% endif %}
+            </small>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="/admin/web/users" class="btn btn-outline-secondary btn-sm rounded-pill">← К клиентам</a>
+            <a href="/admin/web/chats/{{ user.tg_id }}" class="btn btn-outline-primary btn-sm rounded-pill">💬 Открыть чат</a>
+        </div>
+    </div>
+
+    {% if user.is_virtual %}
+    <div class="alert alert-warning rounded-3 small py-2">
+        ⚠️ Пользователь зарегистрирован по почте, Telegram у него нет: сообщение он увидит в чате личного кабинета («Поддержка»).
+    </div>
+    {% endif %}
+
+    {% if messages %}
+    <div class="chat-thread mb-3">
+        {% for m in messages %}
+        <div class="chat-msg {% if m.sender == 'user' %}chat-msg-user{% else %}chat-msg-admin{% endif %}">
+            <div class="chat-msg-meta">
+                {% if m.sender == 'user' %}🧑 Клиент{% else %}👨‍💻 {{ m.sender_name or 'Администратор' }}{% endif %}
+                · {{ m.created_at }}
+            </div>
+            <div class="chat-msg-text">{{ m.text }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-muted">Переписки пока нет — это будет первое сообщение.</p>
+    {% endif %}
+
+    <form method="post" action="/admin/web/users/message">
+        <input type="hidden" name="tg_id" value="{{ user.tg_id }}">
+        <label class="form-label fw-semibold">✍️ Текст сообщения</label>
+        <textarea name="text" class="form-control mb-2" rows="4" required
+                  placeholder="Сообщение пользователю..."></textarea>
+        <button class="btn btn-primary rounded-pill px-4">Отправить</button>
+        <small class="text-muted ms-2">
+            Сообщение сохранится в чате{% if not user.is_virtual %} и придёт пользователю в Telegram{% endif %}.
+        </small>
+    </form>
+</div>
+
+<style>
+    .chat-thread { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+    .chat-msg { max-width: 80%; border-radius: 14px; padding: 8px 12px; background: #eef1f4; }
+    .chat-msg-user { align-self: flex-start; background: #e7e9ee; }
+    .chat-msg-admin { align-self: flex-end; background: #d7e7ff; }
+    .chat-msg-meta { font-size: .72rem; opacity: .7; margin-bottom: 2px; }
+    .chat-msg-text { white-space: pre-wrap; word-break: break-word; }
+</style>
+
+{% endblock %}

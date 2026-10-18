@@ -871,6 +871,41 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
         await _notify_admin_grant(bot, tg_id, srv_name, period, renewed=True, notify_admin=notify_admin)
         return True, "Продлено"
 
+    # === ПОВТОРНАЯ ВЫДАЧА (срок истек / отключен по трафику) ===
+    # Если конфиг пользователя сохранен в базе - возвращаем пир ПРЕЖНИМИ ключами:
+    # старый .conf клиента продолжает работать, ничего переимпортировать не нужно.
+    # Новый конфиг генерируем только если старого нет или вернуть его не удалось
+    # (например, его IP уже выдали другому пользователю).
+    existing_cfg = db.get_user_config(tg_id, server_id)
+    if existing_cfg:
+        reused, reuse_detail = await traffic_module.restore_peer(ip, port, username, existing_cfg)
+        if reused:
+            if period == "trial":
+                t_hours = int(db.get_setting("trial_hours"))
+                db.add_or_update_user(tg_id, server_id, username, hours=t_hours, is_trial=True, config_text=existing_cfg)
+            elif period == "1d": db.add_or_update_user(tg_id, server_id, username, days=1, is_trial=False, config_text=existing_cfg)
+            elif period == "7d": db.add_or_update_user(tg_id, server_id, username, days=7, is_trial=False, config_text=existing_cfg)
+            elif period == "30d": db.add_or_update_user(tg_id, server_id, username, days=30, is_trial=False, config_text=existing_cfg)
+
+            # Новый период оплаты = свежий лимит трафика. Счётчики сервера не трогаем:
+            # если пир успели удалить, awg начинает с нуля и дельта посчитается корректно.
+            db.reset_user_traffic(tg_id, server_id)
+
+            try:
+                await bot.send_message(
+                    tg_id,
+                    f"✅ <b>Доступ предоставлен!</b>\n\n"
+                    f"Сервер: <b>{srv_name}</b>\n\n"
+                    f"Ваш прежний конфиг продолжает работать — скачивать и импортировать новый не нужно!",
+                    parse_mode="HTML"
+                )
+            except Exception as _e:
+                print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
+
+            await _notify_admin_grant(bot, tg_id, srv_name, period, renewed=True, notify_admin=notify_admin)
+            return True, "Выдано (прежний конфиг)"
+        print(f"⚠️ user_handlers: не удалось вернуть прежний конфиг {tg_id}: {reuse_detail} - генерирую новый")
+
     cmd = f"bash /root/add_user.sh {shlex.quote(username)}"
     config_text = await ssh.run_ssh_command(ip, port, cmd)
     

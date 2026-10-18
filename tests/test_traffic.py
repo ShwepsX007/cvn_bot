@@ -597,6 +597,127 @@ async def test_counter_reset_restores_and_warn_flag_cleared_on_raise(monkeypatch
     assert db.get_user_traffic(222, sid)[4] == 0
 
 
+# ---------- ПЕРЕИСПОЛЬЗОВАНИЕ КОНФИГОВ ИЗ БАЗЫ ----------
+
+@pytest.mark.asyncio
+async def test_issue_reuses_saved_config_after_cut(fake_bot):
+    """Срок истек/отключен по трафику - при повторной оплате пир возвращается
+    ПРЕЖНИМИ ключами: старый .conf клиента продолжает работать."""
+    sid = add_server("🇫🇮 Финляндия")
+    db.add_or_update_user(111, sid, "user_111", days=30)
+    db.set_user_config(111, sid, FAKE_CLIENT_CFG)
+    db.apply_user_traffic_counters(111, sid, 3 * GB, 0)
+    db.deactivate_user(111, sid)      # как после истечения срока
+    db.mark_traffic_over(111, sid)    # или отключения по трафику
+
+    fake_ssh = fake_ssh_factory(lambda cmd: "OK restored user_111 PUB" if "awg pubkey" in cmd
+                                else f"неожиданная команда: {cmd}")
+    import unittest.mock as _mock
+    with _mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        ok, msg = await user_handlers.issue_vpn_access(fake_bot, 111, sid, "30d")
+
+    assert ok and msg == "Выдано (прежний конфиг)"
+    # новый конфиг НЕ генерировался и НЕ рассылался
+    assert not any("add_user.sh" in c for _i, _p, c in fake_ssh.calls)
+    assert not any(kind in ("doc", "photo") for kind, *_ in fake_bot.sent)
+    # конфиг в базе прежний, срок продлен, трафик обнулен (новый период оплаты)
+    assert db.get_user_config(111, sid) == FAKE_CLIENT_CFG
+    sub = db.get_user_sub(111, sid)
+    assert sub[5] == 1
+    tr = db.get_user_traffic(111, sid)
+    assert tr[1] == 0 and tr[5] == 0
+    # пользователю объяснено, что конфиг прежний
+    assert any(kind == "msg" and chat == 111 and "прежний конфиг" in t
+               for kind, chat, t, _k in fake_bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_issue_falls_back_to_new_config_when_ip_taken(fake_bot):
+    """Если прежний конфиг вернуть нельзя (его IP уже выдали другому) -
+    генерируется новый, как раньше, и отправляется пользователю."""
+    sid = add_server()
+    db.add_or_update_user(111, sid, "user_111", days=30)
+    db.set_user_config(111, sid, FAKE_CLIENT_CFG)
+    db.deactivate_user(111, sid)
+
+    def ssh_reply(cmd):
+        if "awg pubkey" in cmd:
+            return "Ошибка: IP занят другим пиром"
+        if "add_user.sh" in cmd:
+            return FAKE_CFG
+        return "ok"
+
+    fake_ssh = fake_ssh_factory(ssh_reply)
+    import unittest.mock as _mock
+    with _mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        ok, msg = await user_handlers.issue_vpn_access(fake_bot, 111, sid, "30d")
+
+    assert ok
+    assert any("add_user.sh" in c for _i, _p, c in fake_ssh.calls)   # перевыдача
+    assert any(kind == "doc" and chat == 111 for kind, chat, *_ in fake_bot.sent)  # новый файл
+    assert db.get_user_config(111, sid) == FAKE_CFG                   # конфиг обновлен
+
+
+def test_restore_cmd_has_duplicate_and_ip_guards():
+    cmd = traffic.build_restore_peer_cmd("user_111", "PRIV", "PSK", "10.8.0.7")
+    assert 'grep -c "# Peer: user_111"' in cmd        # не дублировать блок в конфиге
+    assert "IP занят другим пиром" in cmd             # не отбирать IP у другого пира
+    assert "AllowedIPs = 10.8.0.7/32" in cmd
+
+
+def test_inactive_cleanup_retention_is_configurable():
+    sid = add_server()
+    db.add_or_update_user(111, sid, "user_111", days=30)
+    db.deactivate_user(111, sid)
+    conn = db.get_conn()
+    conn.execute("UPDATE users SET last_expired='2020-01-01 00:00:00' WHERE tg_id=? AND server_id=?", (111, sid))
+    conn.commit()
+    conn.close()
+
+    db.update_setting("inactive_cleanup_days", "0")   # хранить, пока числится в базе
+    assert db.get_inactive_users_30d() == []
+    db.update_setting("inactive_cleanup_days", "30")
+    assert [u[0] for u in db.get_inactive_users_30d()] == [111]
+
+
+# ---------- ЛИЧНЫЕ СООБЩЕНИЯ ИЗ АДМИНКИ ----------
+
+def test_admin_can_message_each_user_from_users_page(admin_client, client, fake_bot):
+    # страница отправки: контекст переписки + форма
+    page = admin_client.get("/admin/web/users/message/111")
+    assert page.status_code == 200
+    assert "Сообщение пользователю" in page.text
+
+    # отправка реальному пользователю: в чат (кабинет) + в Telegram
+    r = admin_client.post("/admin/web/users/message",
+                          data={"tg_id": 111, "text": "Здравствуйте! Вопрос по доступу решён."},
+                          follow_redirects=True)
+    assert "отправлено в Telegram" in r.text
+    msgs = db.get_support_messages(111)
+    assert [m[2] for m in msgs] == ["admin"]
+    assert msgs[0][4] == "Здравствуйте! Вопрос по доступу решён."
+    assert any(kind == "msg" and chat == 111 and "Сообщение от администратора" in t
+               for kind, chat, t, _k in fake_bot.sent)
+
+    # почтовый клиент (без Telegram): сообщение сохраняется в чате, TG не дёргается
+    db.create_email_account("msg@example.com", None)
+    v_tg = db.ensure_email_account_tg("msg@example.com")
+    fake_bot.sent = []
+    admin_client.post("/admin/web/users/message", data={"tg_id": v_tg, "text": "Для почтового клиента"})
+    assert [m[2] for m in db.get_support_messages(v_tg)] == ["admin"]
+    assert fake_bot.sent == []
+
+    # пользователь видит сообщение в кабинете (чат поддержки)
+    login(client, 111)
+    history = client.get("/web/support/messages").json()["messages"]
+    assert any("Вопрос по доступу решён." in m["text"] for m in history)
+
+    # без прав админа - нельзя
+    login(client, 555)
+    assert client.post("/admin/web/users/message", data={"tg_id": 111, "text": "x"}).status_code == 403
+    assert client.get("/admin/web/users/message/111").status_code == 403
+
+
 # ---------- КАБИНЕТ И ОПИСАНИЕ ----------
 
 def test_dashboard_shows_traffic_progress_and_over_banner(client):

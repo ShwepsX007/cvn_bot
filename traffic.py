@@ -202,13 +202,40 @@ def build_restore_peer_cmd(username, privkey, psk, client_ip):
         '[ -z "$CONF" ] && { echo "Ошибка: конфиг не найден"; exit 1; }; '
         f'PUB=$(printf %s {shlex.quote(privkey)} | awg pubkey | tr -d "\\r"); '
         '[ -z "$PUB" ] && { echo "Ошибка: не удалось вычислить ключ"; exit 1; }; '
+        f'HAVE=$(grep -c "# Peer: {shlex.quote(username)}" "$CONF" 2>/dev/null); '
+        '[ -z "$HAVE" ] && HAVE=0; '
+        # IP могли выдать другому пользователю, пока этот был отключен
+        f'if [ "$HAVE" = "0" ] && grep -q "AllowedIPs = {shlex.quote(client_ip)}/32" "$CONF"; then '
+        'echo "Ошибка: IP занят другим пиром"; exit 1; fi; '
         f"{psk_part}"
         f'awg set "$IFACE" peer "$PUB"{psk_arg} allowed-ips {shlex.quote(client_ip)}/32 || {{ echo "Ошибка: awg set"; exit 1; }}; '
         f"{psk_cleanup}"
-        f'printf "\\n# Peer: {shlex.quote(username)}\\n[Peer]\\nPublicKey = %s\\n{psk_line}AllowedIPs = {shlex.quote(client_ip)}/32\\n" "$PUB" >> "$CONF"; '
+        f'if [ "$HAVE" = "0" ]; then '
+        f'printf "\\n# Peer: {shlex.quote(username)}\\n[Peer]\\nPublicKey = %s\\n{psk_line}AllowedIPs = {shlex.quote(client_ip)}/32\\n" "$PUB" >> "$CONF"; fi; '
         f'echo "OK restored {shlex.quote(username)} $PUB"'
     )
     return f"docker exec -i amnezia-awg2 sh -c {shlex.quote(script)}"
+
+
+async def restore_peer(ip, port, username, config_text, ssh_fn=None):
+    """Возвращает пир на ноду ПРЕЖНИМИ ключами из клиентского .conf.
+
+    Используется и для автовосстановления по лимиту, и для повторной выдачи
+    доступа: пользователю не нужно импортировать новый конфиг. Возвращает
+    (ok, detail)."""
+    if ssh_fn is None:
+        import ssh_manager as ssh
+        ssh_fn = ssh.run_ssh_command
+    priv, psk, client_ip = parse_client_config(config_text)
+    if not (priv and client_ip):
+        return False, "в сохраненном конфиге нет ключей"
+    try:
+        result = await ssh_fn(ip, port, build_restore_peer_cmd(username, priv, psk, client_ip))
+    except Exception as e:
+        return False, f"нода недоступна: {e}"
+    if result and "Ошибка" not in result:
+        return True, "same_keys"
+    return False, result or "нет ответа"
 
 
 async def restore_user_access(tg_id, server_id, ssh_fn=None):
@@ -239,15 +266,10 @@ async def restore_user_access(tg_id, server_id, ssh_fn=None):
 
     # 1) Попытка вернуть пир с прежними ключами
     cfg = db.get_user_config(tg_id, server_id)
-    priv, psk, client_ip = parse_client_config(cfg)
-    if priv and client_ip:
-        try:
-            result = await ssh_fn(ip, port, build_restore_peer_cmd(username, priv, psk, client_ip))
-            if result and "Ошибка" not in result:
-                db.reactivate_user(tg_id, server_id)
-                return True, "same_keys"
-        except Exception as e:
-            print(f"⚠️ traffic: восстановление прежними ключами не удалось ({tg_id}): {e}")
+    ok, _detail = await restore_peer(ip, port, username, cfg, ssh_fn=ssh_fn)
+    if ok:
+        db.reactivate_user(tg_id, server_id)
+        return True, "same_keys"
 
     # 2) Фолбэк: перевыдача конфига (новые ключи)
     try:

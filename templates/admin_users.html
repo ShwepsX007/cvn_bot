@@ -67,6 +67,8 @@
                             <button class="btn btn-outline-warning btn-sm rounded-pill mb-1">⏸ {{ s.server_name }}</button>
                         </form>
                         {% endfor %}
+                        <a href="/admin/web/users/message/{{ u.tg_id }}" class="btn btn-outline-primary btn-sm rounded-pill mb-1"
+                           title="Написать сообщение пользователю">✉️ Написать</a>
                         {% if u.tg_id != root_admin %}
                         <form method="post" action="/admin/web/users/delete" class="d-inline"
                               onsubmit="return confirm('УДАЛИТЬ пользователя {{ u.tg_id }} со всеми подписками?')">

@@ -65,6 +65,7 @@ SETTING_LABELS = {
     "free_remind_minutes": "Бесплатный доступ: напоминание в TG за (мин)",
     "traffic_limit_gb": "Трафик: общий лимит по умолчанию (ГБ, 0 = без ограничений)",
     "traffic_warn_percent": "Трафик: предупреждать при использовании (%)",
+    "inactive_cleanup_days": "Хранение конфигов отключенных пользователей (дней, 0 = пока числится в базе)",
     "site_banner_html": "Пользовательский рекламный HTML (не отображается на публичных страницах до проверки)",
     "analytics_html": "HTML-код аналитики/счётчика (вставляется перед </body> всех страниц)",
 }
@@ -214,6 +215,46 @@ async def admin_user_delete(request: Request, tg_id: int = Form(...), server_id:
         return _back("/admin/web/users", msg=f"Пользователь {tg_id} удален.")
     except Exception as e:
         return _back("/admin/web/users", error=f"Ошибка удаления: {e}")
+
+
+# ---------- ЛИЧНОЕ СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЮ ----------
+# Любому пользователю можно написать напрямую из админки: сообщение сохраняется
+# в его чате (кабинет -> «Поддержка») и продублируется в Telegram, если он есть.
+
+@router.get("/users/message/{tg_id}")
+async def admin_user_message_form(request: Request, tg_id: int):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse(request=request, name="admin_user_message.html", context=_ctx(
+        request, "users",
+        user=_chat_user_info(tg_id),
+        messages=_chat_messages(tg_id)[-8:],  # последние сообщения для контекста
+    ))
+
+
+@router.post("/users/message")
+async def admin_user_message_send(request: Request, tg_id: int = Form(...), text: str = Form(...)):
+    admin_tg = _admin_tg(request)
+    if not admin_tg:
+        return RedirectResponse(url="/login")
+    text = (text or "").strip()
+    if not text:
+        return _back(f"/admin/web/users/message/{tg_id}", error="Пустое сообщение.")
+
+    sender_name = "Администратор"
+    profile = db.get_user_profile(admin_tg)
+    if profile and profile[0]:
+        sender_name = f"Администратор ({profile[0]})"
+
+    from bot import bot
+    delivered, note = await support_service.reply_and_deliver(
+        bot, tg_id, text, sender_name=sender_name, headline="Сообщение от администратора")
+    if delivered:
+        return _back("/admin/web/users",
+                     msg=f"Сообщение пользователю {tg_id} отправлено в Telegram и сохранено в чате.")
+    return _back("/admin/web/users",
+                 msg=f"Сообщение сохранено в чате — пользователь {tg_id} увидит его в личном кабинете. "
+                     f"В Telegram доставить не удалось: {note}")
 
 
 # ==================== СЕРВЕРЫ ====================
