@@ -9,6 +9,7 @@ import ssh_manager as ssh
 import mailer
 import payments
 import platega
+import support as support_service
 from aiogram import html
 from user_handlers import issue_vpn_access
 from config import ADMIN_ID
@@ -355,20 +356,56 @@ async def manual_hours_proc(message: Message, state: FSMContext):
 # --- ЧАТ И РАССЫЛКА ---
 @admin_router.callback_query(F.data.startswith("reply_to_"))
 async def start_reply(callback: CallbackQuery, state: FSMContext):
-    user_id = callback.data.split("_")[2]
+    raw_id = callback.data[len("reply_to_"):]
+    try:
+        user_id = int(raw_id)
+    except (TypeError, ValueError):
+        await callback.answer("❌ Некорректный ID пользователя.", show_alert=True)
+        return
     await state.update_data(reply_user_id=user_id)
-    await callback.message.answer(f"Введите текст ответа для пользователя {user_id}:")
+
+    # Показываем последние сообщения переписки, чтобы отвечать с контекстом.
+    history = db.get_support_messages(user_id)[-6:]
+    lines = []
+    for _m_id, _m_tg, sender, sender_name, text, created_at in history:
+        who = "🧑 Клиент" if sender == "user" else "👨‍💻 Админ"
+        stamp = (created_at or "")[5:16]
+        lines.append(f"{who} ({stamp}): {text}")
+    hist_text = "\n".join(lines) if lines else "(переписки пока нет - это будет первое сообщение)"
+
+    await callback.message.answer(
+        f"✍️ Ответ пользователю <code>{user_id}</code> "
+        f"({support_service.user_display_name(user_id)}).\n\n"
+        f"<b>Последние сообщения:</b>\n{html.quote(hist_text)}\n\n"
+        f"Отправьте текст ответа одним сообщением:",
+        parse_mode="HTML")
     await state.set_state(AdminStates.waiting_for_reply_text)
     await callback.answer()
 
 @admin_router.message(AdminStates.waiting_for_reply_text)
 async def send_reply(message: Message, state: FSMContext):
+    if not (message.text or "").strip():
+        await message.answer("✍️ Отправьте текст ответа текстовым сообщением.")
+        return  # состояние не сбрасываем
     data = await state.get_data()
     try:
-        await message.bot.send_message(data.get("reply_user_id"), f"👨‍💻 <b>Ответ поддержки:</b>\n\n{message.text}", parse_mode="HTML")
-        await message.answer("✅ Ответ доставлен!")
-    except Exception:
-        await message.answer("❌ Ошибка доставки.")
+        user_id = int(data.get("reply_user_id"))
+    except (TypeError, ValueError):
+        await message.answer("❌ Неизвестный пользователь. Нажмите «Ответить» под обращением заново.")
+        await state.clear()
+        return
+
+    # Ответ сохраняется в чате пользователя ВСЕГДА (виден на сайте), а в Telegram
+    # дублируется по возможности: почтовые аккаунты без TG и пользователи, не
+    # открывавшие бота, иначе получали бы "сообщение не доставлено".
+    delivered, note = await support_service.reply_and_deliver(message.bot, user_id, message.text)
+    if delivered:
+        await message.answer(
+            "✅ Ответ доставлен пользователю в Telegram и сохранён в чате на сайте.")
+    else:
+        await message.answer(
+            "💾 Ответ сохранён в чате на сайте — пользователь увидит его в личном кабинете.\n"
+            f"⚠️ В Telegram доставить не удалось: {html.quote(note or 'нет ответа')}")
     await state.clear()
 
 @admin_router.callback_query(F.data == "adm_broadcast")

@@ -18,6 +18,12 @@
         .sub-card { border-left: 4px solid #198754; }
         .price-btn { min-width: 150px; }
         .badge-trial { background: #ffc107; color: #333; }
+        .support-history { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; }
+        .support-msg { max-width: 85%; border-radius: 14px; padding: 8px 12px; background: #eef1f4; }
+        .support-msg-user { align-self: flex-end; background: #d7e7ff; }
+        .support-msg-admin { align-self: flex-start; background: #e6f6e6; }
+        .support-msg-meta { font-size: .72rem; opacity: .7; margin-bottom: 2px; }
+        .support-msg-text { white-space: pre-wrap; word-break: break-word; }
     </style>
     <link rel="stylesheet" href="/static/app.css">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -239,9 +245,22 @@
             </h2>
             <div id="accSupport" class="accordion-collapse collapse" data-bs-parent="#infoAccordion">
                 <div class="accordion-body">
-                    <p class="text-muted small">Опишите проблему — сообщение придет администратору в Telegram.</p>
+                    <p class="text-muted small">У каждого пользователя свой чат: сообщения сохраняются, ответ администратора появится здесь (и в Telegram, если он привязан).</p>
+                    <div id="supportHistory" class="support-history mb-2">
+                        {% for m in support_messages %}
+                        <div class="support-msg {% if m.sender == 'user' %}support-msg-user{% else %}support-msg-admin{% endif %}">
+                            <div class="support-msg-meta">{{ m.sender_name }} · {{ m.created_at }}</div>
+                            <div class="support-msg-text">{{ m.text }}</div>
+                        </div>
+                        {% else %}
+                        <div id="supportEmpty" class="text-muted small">Пока сообщений нет — напишите первый.</div>
+                        {% endfor %}
+                    </div>
                     <textarea id="supportText" class="form-control mb-2" rows="3" placeholder="Опишите вашу проблему..."></textarea>
-                    <button class="btn btn-primary rounded-pill" onclick="sendSupport()">Отправить</button>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary rounded-pill" onclick="sendSupport()">Отправить</button>
+                        <button class="btn btn-outline-secondary rounded-pill" onclick="loadSupport()">🔄 Обновить</button>
+                    </div>
                     <div id="supportResult" class="small mt-2"></div>
                 </div>
             </div>
@@ -491,8 +510,42 @@ async function linkEmail() {
     }
 }
 
+function supportMsgHtml(m) {
+    const side = m.sender === 'user' ? 'support-msg-user' : 'support-msg-admin';
+    const name = escapeHtml(m.sender_name || (m.sender === 'user' ? 'Вы' : 'Поддержка'));
+    const when = escapeHtml(m.created_at || '');
+    const text = escapeHtml(m.text || '');
+    return `<div class="support-msg ${side}"><div class="support-msg-meta">${name} · ${when}</div>` +
+           `<div class="support-msg-text">${text}</div></div>`;
+}
+
+function renderSupport(messages) {
+    const history = document.getElementById('supportHistory');
+    if (!history) return;
+    if (!messages || !messages.length) {
+        history.innerHTML = '<div class="text-muted small">Пока сообщений нет — напишите первый.</div>';
+        return;
+    }
+    history.innerHTML = messages.map(supportMsgHtml).join('');
+    history.scrollTop = history.scrollHeight;
+}
+
+async function loadSupport() {
+    const resDiv = document.getElementById('supportResult');
+    try {
+        const res = await fetch('/web/support/messages');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        renderSupport(data.messages || []);
+        if (resDiv) resDiv.innerHTML = '<span class="text-success">✅ Чат обновлён.</span>';
+    } catch (e) {
+        if (resDiv) resDiv.innerHTML = `<span class="text-danger">❌ ${escapeHtml(e.message)}</span>`;
+    }
+}
+
 async function sendSupport() {
-    const text = document.getElementById('supportText').value.trim();
+    const input = document.getElementById('supportText');
+    const text = input.value.trim();
     const resDiv = document.getElementById('supportResult');
     if (!text) { resDiv.innerHTML = '<span class="text-danger">Введите текст сообщения.</span>'; return; }
     resDiv.innerHTML = '⏳ Отправка...';
@@ -503,8 +556,10 @@ async function sendSupport() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Ошибка');
-        resDiv.innerHTML = '<span class="text-success">✅ Сообщение отправлено администратору!</span>';
-        document.getElementById('supportText').value = '';
+        input.value = '';
+        // Дописываем сообщение в чат и сразу подтягиваем историю (в ней мог появиться ответ).
+        await loadSupport();
+        resDiv.innerHTML = '<span class="text-success">✅ Сообщение отправлено! Ответ появится в этом чате.</span>';
     } catch (e) {
         resDiv.innerHTML = `<span class="text-danger">❌ ${escapeHtml(e.message)}</span>`;
     }

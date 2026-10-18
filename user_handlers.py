@@ -19,6 +19,7 @@ import payments
 import qrgen
 import emailauth
 import mailer
+import support as support_service
 from config import ADMIN_ID
 
 user_router = Router()
@@ -116,7 +117,7 @@ def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="🛍 Оформить / продлить доступ", callback_data="usr_buy_choose_srv"))
     builder.add(InlineKeyboardButton(
-        text="🎁 Бесплатный доступ",
+        text="🌐 Сайт",
         url=(db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")))
     builder.add(InlineKeyboardButton(text="🔑 Мои конфиги", callback_data="usr_my_configs"))
     builder.add(InlineKeyboardButton(text="👤 Мой профиль", callback_data="usr_profile"))
@@ -700,16 +701,32 @@ async def show_support(callback: CallbackQuery, state: FSMContext):
 
 @user_router.message(SupportStates.waiting_for_question)
 async def process_support_message(message: Message, state: FSMContext):
+    text = (message.text or message.caption or "").strip()
+    if not text:
+        await message.answer("✍️ Пожалуйста, отправьте ваш вопрос текстовым сообщением.")
+        return  # состояние не сбрасываем - пользователь может сразу написать текст
+
+    # Сообщение сохраняется в личном чате пользователя (виден на сайте) - чтобы
+    # переписка не терялась, даже если Telegram-доставка ответа будет недоступна.
+    support_service.save_user_message(
+        message.from_user.id, text,
+        sender_name=message.from_user.full_name)
+
+    identity_note = support_service.user_identity_note(message.from_user.id)
+    identity_line = f"{identity_note}\n" if identity_note else ""
+    site_url = (db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
     admin_text = (
         f"🚨 <b>Новое обращение в поддержку!</b>\n\n"
         f"ID: <code>{message.from_user.id}</code>\n"
-        f"Имя: {message.from_user.full_name}\n\n"
-        f"<b>Текст:</b>\n{message.text}"
+        f"Имя: {html.quote(message.from_user.full_name)}\n"
+        f"{identity_line}\n"
+        f"<b>Текст:</b>\n{html.quote(text)}"
     )
     try:
-        builder = InlineKeyboardBuilder()
-        builder.add(InlineKeyboardButton(text="✍️ Ответить", callback_data=f"reply_to_{message.from_user.id}"))
-        await message.bot.send_message(chat_id=ADMIN_ID, text=admin_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await message.bot.send_message(
+            chat_id=ADMIN_ID, text=admin_text,
+            reply_markup=support_service.admin_reply_keyboard(message.from_user.id, site_url),
+            parse_mode="HTML")
         await message.answer("✅ Сообщение отправлено! Администратор ответит вам.", reply_markup=main_reply_kb)
     except Exception:
         await message.answer("❌ Ошибка отправки.")

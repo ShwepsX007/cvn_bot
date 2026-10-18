@@ -15,6 +15,7 @@ import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.types import BufferedInputFile, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram import html as tg_html
 
 import ssh_manager as ssh
 import database as bot_db
@@ -25,6 +26,7 @@ import qrgen
 import emailauth
 import mailer
 import webauth
+import support
 
 from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, clean_inactive_users, autoupdate_node_containers
 from user_handlers import issue_vpn_access, get_price_for_period, check_and_clean_expired, parse_date, reissue_config_for_active_sub
@@ -994,6 +996,21 @@ async def dashboard(request: Request):
 
     email_acc = bot_db.get_email_account_by_tg(tg_id) if tg_id else None
 
+    # Переписка с поддержкой (личный чат пользователя): показываем в разделе «Поддержка».
+    support_history = []
+    for r in (bot_db.get_support_messages(tg_id) if accepted_tos else []):
+        created = r[5] or ""
+        try:
+            created = parse_date(created).strftime("%d.%m.%Y %H:%M")
+        except Exception:
+            pass
+        support_history.append({
+            "sender": r[2],
+            "sender_name": r[3] or ("Вы" if r[2] == "user" else "Поддержка"),
+            "text": r[4],
+            "created_at": created,
+        })
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -1015,6 +1032,8 @@ async def dashboard(request: Request):
             "email_has_password": bool(email_acc and email_acc[2]),
             # кнопка перехода в админку - только для администраторов
             "is_admin": is_web_admin(tg_id),
+            # переписка с поддержкой (своя у каждого пользователя)
+            "support_messages": support_history,
         }
     )
 
@@ -1265,27 +1284,48 @@ async def web_support(request: Request):
     if not text:
         raise HTTPException(status_code=400, detail="Пустое сообщение")
 
+    # Сообщение сохраняется в личном чате пользователя ВСЕГДА - даже если
+    # уведомление админу в Telegram не доставится, переписка не потеряется.
+    sender_name = request.session.get("display_name") or support.user_display_name(tg_id)
+    support.save_user_message(tg_id, text, sender_name=sender_name)
+
     profile = bot_db.get_user_profile(tg_id)
     full_name = profile[0] if profile and profile[0] else str(tg_id)
     identity_note = _admin_identity_note(request, tg_id)
     identity_line = f"{identity_note}\n" if identity_note else ""
+    site_url = (bot_db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")
 
     admin_text = (
         f"🚨 <b>Новое обращение в поддержку (с сайта)!</b>\n\n"
         f"ID: <code>{tg_id}</code>\n"
-        f"Имя: {full_name}\n"
+        f"Имя: {tg_html.quote(str(full_name))}\n"
         f"{identity_line}\n"
-        f"<b>Текст:</b>\n{text}"
+        f"<b>Текст:</b>\n{tg_html.quote(text)}"
     )
-    builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="✍️ Ответить", callback_data=f"reply_to_{tg_id}"))
-
+    notified = True
     try:
-        await bot.send_message(ADMIN_ID, admin_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await bot.send_message(
+            ADMIN_ID, admin_text,
+            reply_markup=support.admin_reply_keyboard(tg_id, site_url),
+            parse_mode="HTML")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Не удалось отправить сообщение: {e}")
+        notified = False
+        print(f"⚠️ Не удалось уведомить админа о сообщении в поддержку: {e}")
 
-    return {"success": True}
+    return {"success": True, "notified": notified}
+
+@app.get("/web/support/messages")
+async def web_support_messages(request: Request):
+    """История переписки текущего пользователя (для обновления чата без перезагрузки)."""
+    tg_id = _current_tg_id(request)
+    if not tg_id:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    rows = bot_db.get_support_messages(tg_id)
+    return {"messages": [
+        {"id": r[0], "sender": r[2], "sender_name": r[3] or "", "text": r[4],
+         "created_at": r[5] or ""}
+        for r in rows
+    ]}
 
 @app.post("/web/reissue")
 async def web_reissue_config(request: Request):

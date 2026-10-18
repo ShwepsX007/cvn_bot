@@ -23,6 +23,7 @@ import database as db
 import mailer
 import payments
 import platega
+import support as support_service
 from config import ADMIN_ID
 
 router = APIRouter(prefix="/admin/web", tags=["web-admin"])
@@ -480,6 +481,109 @@ async def admin_manual_action(request: Request, order_id: int = Form(...), actio
     except Exception:
         pass
     return _back("/admin/web/requests", msg=f"Платеж #{order_id} отклонен.")
+
+
+# ==================== ЧАТЫ ПОДДЕРЖКИ ====================
+# У каждого пользователя свой чат (все сообщения с одним tg_id). Отвечать можно
+# и отсюда, и из Telegram (кнопка «Ответить» под уведомлением) - история общая.
+# Ответ сохраняется в чате всегда, а в Telegram дублируется по возможности.
+
+def _chat_user_info(tg_id):
+    """Карточка пользователя для страниц чатов: имя, почта, признак «без Telegram»."""
+    acc = (db.get_email_account_by_virtual_tg(tg_id) if db.is_virtual_tg_id(tg_id)
+           else db.get_email_account_by_tg(tg_id))
+    profile = db.get_user_profile(tg_id)
+    return {
+        "tg_id": tg_id,
+        "name": support_service.user_display_name(tg_id),
+        "full_name": (profile[1] if profile and len(profile) > 1 and profile[1] else ""),
+        "email": (acc[1] if acc else None),
+        "is_virtual": db.is_virtual_tg_id(tg_id),
+    }
+
+
+def _fmt_ts(value):
+    """'YYYY-MM-DD HH:MM:SS[.fff]' -> 'DD.MM.YYYY HH:MM' (неизвестное не трогаем)."""
+    from datetime import datetime
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(value or "", fmt).strftime("%d.%m.%Y %H:%M")
+        except (TypeError, ValueError):
+            continue
+    return value or ""
+
+
+def _chat_messages(tg_id):
+    rows = []
+    for m_id, _m_tg, sender, sender_name, text, created_at in db.get_support_messages(tg_id):
+        rows.append({"id": m_id, "sender": sender, "sender_name": sender_name or "",
+                     "text": text, "created_at": _fmt_ts(created_at)})
+    return rows
+
+
+@router.get("/chats")
+async def admin_chats(request: Request):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    chats = []
+    for tg_id, sender, sender_name, text, last_at, cnt in db.get_support_chats():
+        info = _chat_user_info(tg_id)
+        chats.append({
+            "tg_id": tg_id,
+            "name": info["name"],
+            "email": info["email"],
+            "is_virtual": info["is_virtual"],
+            "last_sender": "Клиент" if sender == "user" else "Админ",
+            "last_text": (text or "")[:120],
+            "last_at": _fmt_ts(last_at),
+            "count": cnt,
+        })
+    return templates.TemplateResponse(request=request, name="admin_chats.html", context=_ctx(
+        request, "chats", chats=chats
+    ))
+
+
+@router.get("/chats/{tg_id}")
+async def admin_chat_view(request: Request, tg_id: int):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse(request=request, name="admin_chat.html", context=_ctx(
+        request, "chats",
+        user=_chat_user_info(tg_id),
+        messages=_chat_messages(tg_id),
+    ))
+
+
+@router.post("/chats/{tg_id}/reply")
+async def admin_chat_reply(request: Request, tg_id: int, text: str = Form(...)):
+    admin_tg = _admin_tg(request)
+    if not admin_tg:
+        return RedirectResponse(url="/login")
+    text = (text or "").strip()
+    if not text:
+        return _back(f"/admin/web/chats/{tg_id}", error="Пустое сообщение.")
+
+    sender_name = "Администратор"
+    profile = db.get_user_profile(admin_tg)
+    if profile and profile[0]:
+        sender_name = f"Администратор ({profile[0]})"
+
+    # Сохраняем в чате всегда; в Telegram дублируем по возможности.
+    from bot import bot
+    delivered, note = await support_service.reply_and_deliver(bot, tg_id, text, sender_name=sender_name)
+    if delivered:
+        return _back(f"/admin/web/chats/{tg_id}", msg="Ответ отправлен пользователю в Telegram и сохранён в чате.")
+    return _back(f"/admin/web/chats/{tg_id}",
+                 msg=f"Ответ сохранён в чате — пользователь увидит его на сайте. "
+                     f"В Telegram доставить не удалось: {note}")
+
+
+@router.post("/chats/{tg_id}/delete")
+async def admin_chat_delete(request: Request, tg_id: int):
+    if not _admin_tg(request):
+        return RedirectResponse(url="/login")
+    db.delete_support_chat(tg_id)
+    return _back("/admin/web/chats", msg=f"Чат пользователя {tg_id} удален.")
 
 
 # ==================== НАСТРОЙКИ ====================

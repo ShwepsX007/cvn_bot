@@ -239,6 +239,23 @@ def init_db():
                         added_by INTEGER
                     )''')
 
+    # Переписка поддержки: у каждого пользователя свой чат (все сообщения с одним tg_id).
+    # Сообщения пишутся с двух сторон: 'user' (сайт или бот) и 'admin' (сайт или бот).
+    # История видна пользователю в личном кабинете, админу - в разделе «Чаты» веб-админки
+    # и по кнопке «Ответить» под уведомлением в Telegram.
+    cursor.execute('''CREATE TABLE IF NOT EXISTS support_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        tg_id INTEGER NOT NULL,
+                        sender TEXT NOT NULL,
+                        sender_name TEXT,
+                        text TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_support_messages_tg ON support_messages(tg_id)")
+    except sqlite3.Error:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -645,7 +662,7 @@ def merge_virtual_into_real(virtual_tg, real_tg):
                     (exp, uname, active, is_trial, cfg, real_tg, s_id))
             cursor.execute("DELETE FROM users WHERE tg_id=? AND server_id=?", (virtual_tg, s_id))
 
-        for table in ("orders", "manual_orders", "detail_requests", "free_accesses"):
+        for table in ("orders", "manual_orders", "detail_requests", "free_accesses", "support_messages"):
             cursor.execute(f"UPDATE {table} SET tg_id=? WHERE tg_id=?", (real_tg, virtual_tg))
 
         # Профиль: у реального Telegram-пользователя обычно уже есть свой профиль -
@@ -1250,5 +1267,60 @@ def accept_tos(tg_id):
     # Upsert: у почтовых аккаунтов без Telegram строки профиля может еще не быть.
     cursor.execute('''INSERT INTO user_profiles (tg_id, accepted_tos) VALUES (?, 1)
                       ON CONFLICT(tg_id) DO UPDATE SET accepted_tos=1''', (tg_id,))
+    conn.commit()
+    conn.close()
+
+# --- ПОДДЕРЖКА (переписка пользователь <-> администратор) ---
+# У каждого пользователя свой чат: все сообщения с одним tg_id (в т.ч. виртуальным
+# почтовым). Хранится независимо от того, доставляется ли Telegram - историю всегда
+# видно на сайте.
+
+def add_support_message(tg_id, sender, text, sender_name=None):
+    """Сообщение в чате поддержки. sender: 'user' | 'admin'. Возвращает id записи."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO support_messages (tg_id, sender, sender_name, text) VALUES (?, ?, ?, ?)",
+        (int(tg_id), sender, sender_name, text))
+    msg_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return msg_id
+
+def get_support_messages(tg_id):
+    """Вся переписка пользователя по хронологии:
+    (id, tg_id, sender, sender_name, text, created_at)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, tg_id, sender, sender_name, text, created_at FROM support_messages "
+        "WHERE tg_id=? ORDER BY created_at, id",
+        (int(tg_id),))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_support_chats():
+    """Список чатов (по одному на пользователя), новые сверху. Кортеж:
+    (tg_id, sender, sender_name, text, created_at, msg_count) - с данными
+    ПОСЛЕДНЕГО сообщения и размером чата."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT m.tg_id, m.sender, m.sender_name, m.text, m.created_at, "
+        "(SELECT COUNT(*) FROM support_messages s WHERE s.tg_id = m.tg_id) AS cnt "
+        "FROM support_messages m "
+        "WHERE m.id = (SELECT sm.id FROM support_messages sm WHERE sm.tg_id = m.tg_id "
+        "              ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) "
+        "ORDER BY m.created_at DESC, m.id DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def delete_support_chat(tg_id):
+    """Удаляет весь чат пользователя (все его сообщения)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM support_messages WHERE tg_id=?", (int(tg_id),))
     conn.commit()
     conn.close()
