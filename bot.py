@@ -139,6 +139,13 @@ async def check_traffic_limits():
     except Exception as e:
         print(f"⚠️ Ошибка синхронизации трафика: {e}")
 
+    # Самовосстановление: если лимит подняли (в т.ч. после ошибки с настройками) -
+    # отключенные по нему пользователи возвращаются в строй без оплаты.
+    try:
+        await traffic.restore_after_limit_change(bot=bot)
+    except Exception as e:
+        print(f"⚠️ Ошибка автовосстановления по трафику: {e}")
+
     try:
         warn_percent = int(db.get_setting("traffic_warn_percent") or 0)
     except (TypeError, ValueError):

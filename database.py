@@ -1459,6 +1459,15 @@ def mark_traffic_warned(tg_id, server_id):
     conn.commit()
     conn.close()
 
+def clear_traffic_warned(tg_id, server_id):
+    """Снимает флаг предупреждения (лимит подняли - предупреждать можно снова)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET traffic_warned=0 WHERE tg_id=? AND server_id=?",
+                   (int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+
 def mark_traffic_over(tg_id, server_id):
     conn = get_conn()
     cursor = conn.cursor()
@@ -1466,6 +1475,29 @@ def mark_traffic_over(tg_id, server_id):
                    (int(tg_id), int(server_id)))
     conn.commit()
     conn.close()
+
+def reactivate_user(tg_id, server_id):
+    """Возвращает подписку в строй после отключения по лимиту трафика (лимит
+    подняли/счётчик обнулили - в т.ч. после ошибки админа). СРОК не меняется:
+    восстанавливаются только активность и флаги трафика."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET active=1, traffic_over=0, traffic_warned=0 WHERE tg_id=? AND server_id=?",
+                   (int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+
+def get_subs_over_traffic():
+    """Подписки, отключенные по лимиту трафика (для автовосстановления):
+    (tg_id, server_id, username, expire_date, active, traffic_limit_gb, traffic_used_bytes)."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT tg_id, server_id, username, expire_date, active, traffic_limit_gb, traffic_used_bytes "
+        "FROM users WHERE traffic_over=1")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
 def get_active_subs_with_traffic():
     """Активные подписки с трафиком для проверки лимитов:

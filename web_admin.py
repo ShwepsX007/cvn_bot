@@ -663,7 +663,10 @@ async def admin_traffic_settings(request: Request,
         "traffic_limit_gb": "0" if limit in (None, 0) else f"{limit:g}",
         "traffic_warn_percent": str(warn),
     })
-    return _back("/admin/web/traffic", msg="Общие настройки трафика сохранены.")
+    from bot import bot
+    restored = await traffic_module.restore_after_limit_change(bot=bot)
+    extra = f" Возвращено в строй: {restored}." if restored else ""
+    return _back("/admin/web/traffic", msg=f"Общие настройки трафика сохранены.{extra}")
 
 
 @router.post("/traffic/limit")
@@ -679,7 +682,11 @@ async def admin_traffic_set_limit(request: Request, tg_id: int = Form(...),
         return _back("/admin/web/traffic", error="Подписка не найдена.")
     db.set_user_traffic_limit(tg_id, server_id, limit)
     desc = "общий по умолчанию" if limit is None else ("без лимита" if not limit else f"{limit:g} ГБ")
-    return _back("/admin/web/traffic", msg=f"Лимит трафика для {tg_id} (сервер {server_id}): {desc}.")
+    # Лимит подняли - если подписка была отключена по старому лимиту, вернуть её.
+    from bot import bot
+    restored = await traffic_module.restore_after_limit_change(bot=bot)
+    extra = f" Доступ восстановлен автоматически." if restored else ""
+    return _back("/admin/web/traffic", msg=f"Лимит трафика для {tg_id} (сервер {server_id}): {desc}.{extra}")
 
 
 @router.post("/traffic/reset")
@@ -687,7 +694,11 @@ async def admin_traffic_reset(request: Request, tg_id: int = Form(...), server_i
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
     db.reset_user_traffic(tg_id, server_id, full=True)
-    return _back("/admin/web/traffic", msg=f"Счётчик трафика пользователя {tg_id} (сервер {server_id}) обнулён.")
+    from bot import bot
+    restored = await traffic_module.restore_after_limit_change(bot=bot)
+    extra = f" Доступ восстановлен автоматически." if restored else ""
+    return _back("/admin/web/traffic",
+                 msg=f"Счётчик трафика пользователя {tg_id} (сервер {server_id}) обнулён.{extra}")
 
 
 @router.post("/traffic/apply-all")
@@ -702,7 +713,10 @@ async def admin_traffic_apply_all(request: Request, limit_gb: str = Form("")):
         return _back("/admin/web/traffic", error="Укажите лимит для применения ко всем (0 = без лимита).")
     db.set_all_traffic_limits(limit)
     desc = "без лимита" if not limit else f"{limit:g} ГБ"
-    return _back("/admin/web/traffic", msg=f"Лимит {desc} установлен для ВСЕХ подписок.")
+    from bot import bot
+    restored = await traffic_module.restore_after_limit_change(bot=bot)
+    extra = f" Возвращено в строй: {restored}." if restored else ""
+    return _back("/admin/web/traffic", msg=f"Лимит {desc} установлен для ВСЕХ подписок.{extra}")
 
 
 @router.post("/traffic/clear-all")
@@ -710,7 +724,11 @@ async def admin_traffic_clear_all(request: Request):
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
     db.set_all_traffic_limits(None)
-    return _back("/admin/web/traffic", msg="Личные лимиты сброшены: все подписки используют общий по умолчанию.")
+    from bot import bot
+    restored = await traffic_module.restore_after_limit_change(bot=bot)
+    extra = f" Возвращено в строй: {restored}." if restored else ""
+    return _back("/admin/web/traffic",
+                 msg=f"Личные лимиты сброшены: все подписки используют общий по умолчанию.{extra}")
 
 
 @router.post("/traffic/sync")

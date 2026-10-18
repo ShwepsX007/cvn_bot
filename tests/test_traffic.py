@@ -425,6 +425,178 @@ async def test_telegram_admin_traffic_panel(fake_bot):
     assert "admin/web/traffic" in str(message.edit_text.await_args)
 
 
+# ---------- ВОССТАНОВЛЕНИЕ ПОСЛЕ ОШИБОЧНОГО ЛИМИТА ----------
+
+FAKE_CLIENT_CFG = (
+    "[Interface]\n"
+    "Address = 10.8.0.7/32\n"
+    "DNS = 1.1.1.1\n"
+    "PrivateKey = CLIENTPRIVKEY123\n\n"
+    "[Peer]\n"
+    "PublicKey = SERVERPUB\n"
+    "PresharedKey = PSKVALUE456\n"
+    "Endpoint = 1.2.3.4:22222\n"
+    "AllowedIPs = 0.0.0.0/0\n"
+)
+
+
+def cut_for_traffic(tg_id, sid, used_bytes, limit_gb):
+    """Симулирует результат срабатывания лимита: расход, отключение, флаг over."""
+    db.add_or_update_user(tg_id, sid, f"user_{tg_id}", days=30)
+    db.apply_user_traffic_counters(tg_id, sid, used_bytes, 0)
+    if limit_gb is not None:
+        db.set_user_traffic_limit(tg_id, sid, limit_gb)
+    db.deactivate_user(tg_id, sid)
+    db.mark_traffic_over(tg_id, sid)
+
+
+def test_parse_client_config_and_restore_cmd():
+    priv, psk, ip = traffic.parse_client_config(FAKE_CLIENT_CFG)
+    assert (priv, psk, ip) == ("CLIENTPRIVKEY123", "PSKVALUE456", "10.8.0.7")
+    cmd = traffic.build_restore_peer_cmd("user_111", priv, psk, ip)
+    assert "awg pubkey" in cmd                 # ключ вычисляется на ноде из приватного
+    assert "user_111" in cmd                    # пир подписывается именем для remove/traffic
+    assert "10.8.0.7/32" in cmd
+    assert "PSKVALUE456" in cmd
+    assert "OK restored" in cmd
+
+
+def test_admin_raise_limit_restores_user_same_keys(admin_client, fake_bot):
+    """Сценарий ошибки: лимит 3 ГБ вместо 3000, доступ отключился; админ поднял
+    лимит - доступ возвращается без оплаты, конфиг клиента продолжает работать."""
+    sid = add_server("🇳🇱 Нидерланды")
+    cut_for_traffic(111, sid, used_bytes=4 * GB, limit_gb=3)
+    db.set_user_config(111, sid, FAKE_CLIENT_CFG)
+    assert db.get_user_sub(111, sid)[5] == 0  # отрезан
+
+    fake_ssh = fake_ssh_factory(lambda cmd: "OK restored user_111 PUB" if "awg pubkey" in cmd
+                                else ("ok" if "remove_user.sh" in cmd else FAKE_OUT))
+    import unittest.mock as _mock
+    with _mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        r = admin_client.post("/admin/web/traffic/limit",
+                              data={"tg_id": 111, "server_id": sid, "limit_gb": "3000"},
+                              follow_redirects=True)
+
+    # доступ вернулся, флаги сняты, срок не тронут
+    sub = db.get_user_sub(111, sid)
+    assert sub[5] == 1
+    assert db.get_user_traffic(111, sid)[5] == 0
+    assert "восстановлен автоматически" in r.text or "Доступ восстановлен" in r.text
+
+    # пир возвращен ПРЕЖНИМИ ключами (перевыдача add_user.sh НЕ понадобилась)
+    restore_calls = [c for _i, _p, c in fake_ssh.calls if "awg pubkey" in c]
+    assert restore_calls
+    assert "CLIENTPRIVKEY123" in restore_calls[0]   # ключ для awg pubkey на ноде
+    assert not any("add_user.sh" in c for _i, _p, c in fake_ssh.calls)
+
+    # уведомления: пользователю и админу
+    assert any(kind == "msg" and chat == 111 and "Доступ восстановлен" in t
+               for kind, chat, t, _k in fake_bot.sent)
+    assert any(kind == "msg" and chat == web_app.ADMIN_ID for kind, chat, t, _k in fake_bot.sent)
+
+
+def test_restore_falls_back_to_reissue_without_saved_config(admin_client, fake_bot):
+    """Без сохраненного конфига доступ восстанавливается перевыдачей - новый файл
+    сохраняется в кабинете и отправляется пользователю."""
+    sid = add_server()
+    cut_for_traffic(222, sid, used_bytes=5 * GB, limit_gb=3)
+
+    fake_ssh = fake_ssh_factory(lambda cmd: FAKE_CFG if "add_user.sh" in cmd else "ok")
+    import unittest.mock as _mock
+    with _mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        admin_client.post("/admin/web/traffic/limit",
+                          data={"tg_id": 222, "server_id": sid, "limit_gb": "3000"})
+
+    assert db.get_user_sub(222, sid)[5] == 1
+    assert db.get_user_config(222, sid) == FAKE_CFG  # новый конфиг сохранен для скачивания
+    # пользователю отправлен новый конфиг в Telegram
+    assert any(kind == "doc" and chat == 222 for kind, chat, *_ in fake_bot.sent)
+
+
+def test_no_restore_while_still_over_limit(admin_client, fake_bot):
+    sid = add_server()
+    cut_for_traffic(111, sid, used_bytes=10 * GB, limit_gb=3)
+    db.set_user_config(111, sid, FAKE_CLIENT_CFG)
+
+    import unittest.mock as _mock
+    with _mock.patch("ssh_manager.run_ssh_command", fake_ssh_factory()):
+        admin_client.post("/admin/web/traffic/limit",
+                          data={"tg_id": 111, "server_id": sid, "limit_gb": "8"})  # 8 < 10 ГБ
+    assert db.get_user_sub(111, sid)[5] == 0  # всё ещё отключен
+    assert db.get_user_traffic(111, sid)[5] == 1
+
+
+def test_no_restore_when_subscription_time_expired(admin_client):
+    sid = add_server()
+    cut_for_traffic(111, sid, used_bytes=4 * GB, limit_gb=3)
+    db.set_user_config(111, sid, FAKE_CLIENT_CFG)
+    # срок истек (например, пока разбирались с лимитом)
+    conn = db.get_conn()
+    conn.execute("UPDATE users SET expire_date='2020-01-01 00:00:00' WHERE tg_id=? AND server_id=?", (111, sid))
+    conn.commit()
+    conn.close()
+
+    import unittest.mock as _mock
+    with _mock.patch("ssh_manager.run_ssh_command", fake_ssh_factory()):
+        admin_client.post("/admin/web/traffic/limit",
+                          data={"tg_id": 111, "server_id": sid, "limit_gb": "3000"})
+    assert db.get_user_sub(111, sid)[5] == 0  # не восстановлен: срок честно истек
+
+
+@pytest.mark.asyncio
+async def test_periodic_job_restores_after_global_limit_fix(monkeypatch, fake_bot):
+    """Порог сработал по общему лимиту (настройка «по умолчанию») - после починки
+    общей настройки фоновая проверка тоже возвращает пользователей в строй."""
+    sid = add_server()
+    db.update_setting("traffic_limit_gb", "3")
+    db.update_setting("traffic_warn_percent", "0")
+    db.add_or_update_user(111, sid, "user_111", days=30)
+    db.apply_user_traffic_counters(111, sid, 4 * GB, 0)
+    db.deactivate_user(111, sid)
+    db.mark_traffic_over(111, sid)
+
+    # админ починил общий лимит прямо в настройках (не через страницу «Трафик»)
+    db.update_setting("traffic_limit_gb", "3000")
+
+    fake_ssh = fake_ssh_factory(lambda cmd: "OK restored" if "awg pubkey" in cmd else FAKE_OUT)
+    monkeypatch.setattr(bot_module, "bot", fake_bot)
+    monkeypatch.setattr(ssh_manager, "run_ssh_command", fake_ssh)
+    monkeypatch.setattr(bot_module.ssh, "run_ssh_command", fake_ssh)
+
+    await bot_module.check_traffic_limits()
+    assert db.get_user_sub(111, sid)[5] == 1
+    assert db.get_user_traffic(111, sid)[5] == 0
+    assert any("Доступ восстановлен" in t for kind, chat, t, _k in fake_bot.sent if kind == "msg")
+
+
+@pytest.mark.asyncio
+async def test_counter_reset_restores_and_warn_flag_cleared_on_raise(monkeypatch, fake_bot):
+    sid = add_server()
+    cut_for_traffic(111, sid, used_bytes=4 * GB, limit_gb=3)
+    db.set_user_config(111, sid, FAKE_CLIENT_CFG)
+    # второй пользователь: только предупрежден, лимит подняли - флаг снимается
+    db.add_or_update_user(222, sid, "user_222", days=30)
+    db.set_user_traffic_limit(222, sid, 3)
+    db.apply_user_traffic_counters(222, sid, int(2.5 * GB), 0)
+    db.mark_traffic_warned(222, sid)
+
+    fake_ssh = fake_ssh_factory(lambda cmd: "OK restored" if "awg pubkey" in cmd else "ok")
+    monkeypatch.setattr(bot_module, "bot", fake_bot)
+    monkeypatch.setattr(ssh_manager, "run_ssh_command", fake_ssh)
+
+    # сброс счётчика через админку восстанавливает отключенного
+    restored = await traffic.restore_after_limit_change(bot=fake_bot, ssh_fn=fake_ssh)
+    # у 111-го лимит ещё 3 ГБ, расход 4 - не восстанавливается; поднимем
+    assert restored == 0
+    db.set_user_traffic_limit(111, sid, 3000)
+    db.set_user_traffic_limit(222, sid, 3000)
+    restored = await traffic.restore_after_limit_change(bot=fake_bot, ssh_fn=fake_ssh)
+    assert restored == 1
+    assert db.get_user_sub(111, sid)[5] == 1
+    # предупреждение 222-го снято: до нового лимита далеко
+    assert db.get_user_traffic(222, sid)[4] == 0
+
+
 # ---------- КАБИНЕТ И ОПИСАНИЕ ----------
 
 def test_dashboard_shows_traffic_progress_and_over_banner(client):
