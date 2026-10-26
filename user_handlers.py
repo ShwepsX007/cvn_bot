@@ -1026,7 +1026,11 @@ async def _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, 
     await _notify_admin_grant(bot, tg_id, srv_name, f"{gb_amount}gb", renewed=False, notify_admin=notify_admin)
     return True, "Выдано (гигабайты)"
 
-async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
+async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False, admin_grant=False):
+    """Выдача/продление доступа. period: trial/1d/7d/30d или "10gb" (покупка ГБ).
+
+    admin_grant=True - выдача вручную из админки: минимальный порог покупки
+    не применяется (админ может выдать любое количество гигабайт)."""
     username = f"user_{tg_id}"
     server = db.get_server_by_id(server_id)
     if not server: return False, "Сервер не найден"
@@ -1038,9 +1042,12 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
     # действует) продолжает идти как раньше, гигабайты расходуются после его окончания.
     gb_amount = parse_gb_token(period)
     if gb_amount is not None:
-        min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
-        if gb_amount < min_gb:
-            return False, f"Минимальная покупка — {min_gb} ГБ"
+        if gb_amount < 1:
+            return False, "Количество гигабайт должно быть больше нуля"
+        if not admin_grant:
+            min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
+            if gb_amount < min_gb:
+                return False, f"Минимальная покупка — {min_gb} ГБ"
         return await _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, gb_amount, notify_admin)
 
     # === ПРОВЕРКА НА ПРОДЛЕНИЕ АКТИВНОГО КОНФИГА ===

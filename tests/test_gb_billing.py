@@ -25,6 +25,7 @@ import bot as bot_module
 import database as db
 import traffic
 import user_handlers
+import web_admin
 import web_app
 
 pytestmark = pytest.mark.usefixtures("isolated_db")
@@ -58,6 +59,15 @@ def client(monkeypatch, fake_bot):
     monkeypatch.setattr(web_app, "bot", fake_bot)
     monkeypatch.setattr(bot_module, "bot", fake_bot)
     with TestClient(web_app.app, base_url="https://testserver") as client:
+        yield client
+
+
+@pytest.fixture
+def admin_client(monkeypatch, fake_bot):
+    monkeypatch.setattr(web_app, "bot", fake_bot)
+    monkeypatch.setattr(bot_module, "bot", fake_bot)
+    with TestClient(web_app.app, base_url="https://testserver") as client:
+        login(client, web_admin.ROOT_ADMIN_ID)
         yield client
 
 
@@ -422,3 +432,64 @@ def test_dashboard_shows_gb_balance(client):
     assert "Остаток трафика" in page.text
     assert "10.00 ГБ" in page.text
     assert "Купить гигабайты" in page.text or "гигабайты" in page.text
+
+
+# ---------- АДМИНКА: РУЧНАЯ ВЫДАЧА ГИГАБАЙТОВ И ВИДИМОСТЬ БАЛАНСА ----------
+
+def test_admin_grant_gb_any_amount(admin_client, fake_bot):
+    """Админ выдает любое количество ГБ - минимальный порог покупки не действует."""
+    enable_gb_mode()
+    db.update_setting("min_purchase_gb", "5")
+    sid = add_server()
+
+    fake_ssh = fake_ssh_factory(lambda cmd: FAKE_CFG if "add_user.sh" in cmd else "ok")
+    with mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        r = admin_client.post("/admin/web/users/grant",
+                              data={"tg_id": 777, "server_id": sid, "period": "gb", "gb_amount": "3"},
+                              follow_redirects=True)
+    assert r.status_code == 200
+    assert "3 ГБ" in r.text                     # «Доступ (3 ГБ) выдан…»
+    assert db.get_user_balance(777, sid) == 3   # меньше минимума - но выдано
+
+    # ошибочные количества отклоняются
+    r = admin_client.post("/admin/web/users/grant",
+                          data={"tg_id": 777, "server_id": sid, "period": "gb", "gb_amount": "0"},
+                          follow_redirects=True)
+    assert "Укажите" in r.text or "должно быть" in r.text
+    assert db.get_user_balance(777, sid) == 3   # не изменился
+
+
+def test_admin_grant_periods_still_work(admin_client, fake_bot):
+    """Сроковая выдача из админки работает и в гигабайтном режиме."""
+    enable_gb_mode()
+    sid = add_server()
+    fake_ssh = fake_ssh_factory(lambda cmd: FAKE_CFG if "add_user.sh" in cmd else "ok")
+    with mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        r = admin_client.post("/admin/web/users/grant",
+                              data={"tg_id": 778, "server_id": sid, "period": "7d", "gb_amount": ""},
+                              follow_redirects=True)
+    assert r.status_code == 200
+    assert "7 дней" in r.text
+    sub = db.get_user_sub(778, sid)
+    assert sub and sub[5] == 1
+    # срок установлен в будущем
+    from user_handlers import parse_date
+    assert parse_date(sub[3]).year >= 2026
+
+
+def test_admin_pages_show_gb_balance(admin_client, fake_bot):
+    """Баланс гигабайт виден на страницах «Клиенты» и «Трафик»."""
+    enable_gb_mode()
+    sid = add_server()
+    db.update_user_profile(779, "Balance User", None)
+    db.grant_gb(779, sid, "user_779", 10)
+    db.consume_gb_balance(779, sid, 2.5 * GB, burn=True)
+
+    page = admin_client.get("/admin/web/users")
+    assert page.status_code == 200
+    assert "7.50 ГБ" in page.text
+
+    page = admin_client.get("/admin/web/traffic")
+    assert page.status_code == 200
+    assert "🪙 Гигабайты" in page.text
+    assert "7.50 ГБ" in page.text

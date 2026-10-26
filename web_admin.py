@@ -163,17 +163,21 @@ async def admin_users(request: Request):
 
     profiles = db.get_all_profiles()
     users = []
+    billing_gb = db.get_billing_mode() == "traffic"
     for p_tg, full_name, username, last_active, accepted_tos, subs_total, subs_active in profiles:
         subs = []
         for sub in (db.get_user_subs(p_tg) or []):
             s_id = sub[1]
             srv = db.get_server_by_id(s_id)
+            gb_row = db.get_user_gb(p_tg, s_id)
             subs.append({
                 "server_id": s_id,
                 "server_name": srv[2] if srv else f"#{s_id}",
                 "expire": sub[3],
                 "active": sub[5] == 1,
                 "is_trial": sub[6] == 1 if len(sub) > 6 else False,
+                # остаток оплаченных гигабайт (виден и вне гигабайтного режима)
+                "balance": (gb_row[0] or 0) if gb_row else 0,
             })
         users.append({
             "tg_id": p_tg,
@@ -185,27 +189,42 @@ async def admin_users(request: Request):
 
     servers = db.get_active_servers() or []
     return templates.TemplateResponse(request=request, name="admin_users.html", context=_ctx(
-        request, "users", users=users, servers=servers, root_admin=ROOT_ADMIN_ID
+        request, "users", users=users, servers=servers, root_admin=ROOT_ADMIN_ID,
+        billing_gb=billing_gb,
     ))
 
 
 @router.post("/users/grant")
-async def admin_user_grant(request: Request, tg_id: int = Form(...), server_id: int = Form(...), period: str = Form(...)):
+async def admin_user_grant(request: Request, tg_id: int = Form(...), server_id: int = Form(...),
+                           period: str = Form(...), gb_amount: str = Form("")):
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
-    if period not in PERIOD_LABELS:
+
+    # Гигабайтная выдача: админ вводит любое количество (минимальный порог
+    # покупки на ручную выдачу админом не действует).
+    grant_token = period
+    if period == "gb":
+        raw = (gb_amount or "").strip().replace(",", ".")
+        try:
+            gb_val = int(float(raw))
+        except (TypeError, ValueError):
+            return _back("/admin/web/users", error="Укажите целое количество гигабайт (например 10).")
+        if gb_val < 1 or gb_val > 100000:
+            return _back("/admin/web/users", error="Количество гигабайт должно быть от 1 до 100000.")
+        grant_token = f"{gb_val}gb"
+    elif period not in PERIOD_LABELS:
         return _back("/admin/web/users", error="Неизвестный период.")
 
     from bot import bot  # локальный импорт - модуль бота инициализируется в web_app
-    from user_handlers import issue_vpn_access
+    from user_handlers import issue_vpn_access, period_label
 
     try:
         db.update_user_profile(tg_id, str(tg_id), None)
-        success, msg = await issue_vpn_access(bot, tg_id, server_id, period)
+        success, msg = await issue_vpn_access(bot, tg_id, server_id, grant_token, admin_grant=True)
     except Exception as e:
         return _back("/admin/web/users", error=f"Ошибка выдачи: {e}")
     if success:
-        return _back("/admin/web/users", msg=f"Доступ ({PERIOD_LABELS[period]}) выдан пользователю {tg_id}.")
+        return _back("/admin/web/users", msg=f"Доступ ({period_label(grant_token)}) выдан пользователю {tg_id}.")
     return _back("/admin/web/users", error=f"Не удалось выдать доступ: {msg}")
 
 
@@ -687,6 +706,8 @@ async def admin_traffic(request: Request):
             "percent": percent,
             "warned": warned == 1,
             "over": over == 1,
+            # кошелек гигабайт (погигабайтная тарификация)
+            "balance_gb": ((db.get_user_gb(tg_id, s_id) or [0])[0] or 0),
         })
     return templates.TemplateResponse(request=request, name="admin_traffic.html", context=_ctx(
         request, "traffic",
