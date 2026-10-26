@@ -807,25 +807,29 @@ async def srv_price_edit(callback: CallbackQuery):
     else:
         name = server[2]
         p1, p7, p30 = None, None, None
-    
+    p_gb = server[7] if len(server) > 7 else None
+
     c_p1 = p1 if p1 is not None else db.get_setting("price_1d")
     c_p7 = p7 if p7 is not None else db.get_setting("price_7d")
     c_p30 = p30 if p30 is not None else db.get_setting("price_30d")
-    
+    c_p_gb = p_gb if p_gb is not None and float(p_gb) > 0 else db.get_setting("gb_price_rub")
+
     text = (
         f"⚙️ <b>Цены для сервера: {name}</b>\n\n"
         f"💵 1 день: {c_p1} руб.\n"
         f"💵 7 дней: {c_p7} руб.\n"
-        f"💵 30 дней: {c_p30} руб.\n\n"
+        f"💵 30 дней: {c_p30} руб.\n"
+        f"💵 1 ГБ (погигабайтный режим): {c_p_gb} руб.\n\n"
         f"<i>Если цена не установлена, используется глобальная.</i>"
     )
-    
+
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="📝 1 день", callback_data=f"set_srv_{s_id}_price_1d"))
     builder.add(InlineKeyboardButton(text="📝 7 дней", callback_data=f"set_srv_{s_id}_price_7d"))
     builder.add(InlineKeyboardButton(text="📝 30 дней", callback_data=f"set_srv_{s_id}_price_30d"))
+    builder.add(InlineKeyboardButton(text="📝 1 ГБ", callback_data=f"set_srv_{s_id}_price_1gb"))
     builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data="adm_srv_prices_menu"))
-    builder.adjust(3, 1)
+    builder.adjust(3, 2, 1)
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @admin_router.callback_query(F.data.startswith("set_srv_"))

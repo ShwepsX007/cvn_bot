@@ -29,7 +29,8 @@ def init_db():
                         max_users INTEGER DEFAULT 50,
                         price_1d INTEGER,
                         price_7d INTEGER,
-                        price_30d INTEGER
+                        price_30d INTEGER,
+                        price_1gb REAL
                     )''')
     
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
@@ -105,6 +106,9 @@ def init_db():
         ('gb_price_rub', '50'),
         # Минимальная покупка трафика в ГБ (0 = без ограничений).
         ('min_purchase_gb', '5'),
+        # Бесплатный пробный ТРАФИК в гигабайтах (в гигабайтном режиме вместо
+        # пробного периода в часах; trial_hours остается для режима по срокам).
+        ('trial_gb', '1'),
         # Отключать доступ, если пользователь не расходует трафик N месяцев
         # (0 = не отключать). Действует в гигабайтном режиме.
         ('inactive_months_off', '3'),
@@ -144,6 +148,13 @@ def init_db():
     # Маркер бесплатного сервера (только сайт). Существующие строки = 0.
     try:
         cursor.execute("ALTER TABLE servers ADD COLUMN is_free INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
+    # Своя цена 1 ГБ для каждого сервера (погигабайтная тарификация).
+    # NULL = используется глобальная настройка gb_price_rub.
+    try:
+        cursor.execute("ALTER TABLE servers ADD COLUMN price_1gb REAL")
     except sqlite3.OperationalError:
         pass
 
@@ -421,7 +432,8 @@ def get_server_free_flags():
 def get_server_by_id(server_id):
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT ip, port, name, max_users, price_1d, price_7d, price_30d FROM servers WHERE id=?", (server_id,))
+    cursor.execute("SELECT ip, port, name, max_users, price_1d, price_7d, price_30d, price_1gb "
+                   "FROM servers WHERE id=?", (server_id,))
     server = cursor.fetchone()
     conn.close()
     return server
@@ -951,10 +963,12 @@ def clear_revenue_baseline():
     update_setting("stats_baseline_sum", "0")
 
 def get_all_servers_full():
-    """Все серверы (и неактивные): (id, ip, port, active, name, max_users, price_1d, price_7d, price_30d)."""
+    """Все серверы (и неактивные): (id, ip, port, active, name, max_users,
+    price_1d, price_7d, price_30d, price_1gb)."""
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, ip, port, active, name, max_users, price_1d, price_7d, price_30d FROM servers ORDER BY id")
+    cursor.execute("SELECT id, ip, port, active, name, max_users, price_1d, price_7d, price_30d, price_1gb "
+                   "FROM servers ORDER BY id")
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -1444,13 +1458,16 @@ def get_user_balance(tg_id, server_id):
     row = get_user_gb(tg_id, server_id)
     return (row[0] or 0) if row else 0.0
 
-def grant_gb(tg_id, server_id, username, gb, config_text=None):
+def grant_gb(tg_id, server_id, username, gb, config_text=None, is_trial=None):
     """Зачисляет купленные гигабайты на кошелек подписки (погигабайтная тарификация).
 
     СРОК (expire_date) не трогает: у существующих подписок он остается как был
     (срок по времени действует до конца, гигабайты пригодятся после), у новых строк
     ставится текущий момент - такая подписка живет, пока есть непотраченные ГБ.
-    Доступ активируется (active=1), флаг «трафик исчерпан» снимается."""
+    Доступ активируется (active=1), флаг «трафик исчерпан» снимается.
+
+    is_trial: None - не менять метку пробного; True - пробный трафик
+    (has_used_trial=1); False - оплаченная покупка (метка пробного снимается)."""
     conn = get_conn()
     cursor = conn.cursor()
     cursor.execute(
@@ -1462,15 +1479,21 @@ def grant_gb(tg_id, server_id, username, gb, config_text=None):
     row = cursor.fetchone()
     now = datetime.now()
     if row:
-        expire_date, has_trial, last_expired, cfg, is_trial = row[0], row[1], row[2], row[3], row[4]
+        expire_date, has_trial, last_expired, cfg, prev_is_trial = row[0], row[1], row[2], row[3], row[4]
         limit_gb, used, last_rx, last_tx = row[5], row[6], row[7], row[8]
         balance, purchased = (row[9] or 0), (row[10] or 0)
     else:
-        expire_date, has_trial, last_expired, cfg, is_trial = now, 0, None, None, 0
+        expire_date, has_trial, last_expired, cfg, prev_is_trial = now, 0, None, None, 0
         limit_gb, used, last_rx, last_tx = None, 0, 0, 0
         balance, purchased = 0, 0
     if config_text is None:
         config_text = cfg
+    if is_trial is None:
+        new_is_trial = prev_is_trial
+    else:
+        new_is_trial = 1 if is_trial else 0
+    if is_trial:
+        has_trial = 1
     balance += float(gb)
     purchased += float(gb)
 
@@ -1481,7 +1504,7 @@ def grant_gb(tg_id, server_id, username, gb, config_text=None):
                        traffic_warned, traffic_over, traffic_balance_gb, traffic_purchased_gb,
                        traffic_last_activity) 
                       VALUES (?, ?, ?, ?, ?, 1, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)''',
-                   (int(tg_id), int(server_id), username, expire_date, has_trial, is_trial,
+                   (int(tg_id), int(server_id), username, expire_date, has_trial, new_is_trial,
                     last_expired, config_text,
                     limit_gb, used, last_rx, last_tx,
                     balance, purchased, now))

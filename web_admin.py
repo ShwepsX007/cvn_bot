@@ -69,6 +69,7 @@ SETTING_LABELS = {
     "billing_mode": "Тарификация: time = по срокам, traffic = по гигабайтам",
     "gb_price_rub": "Цена 1 ГБ в рублях (гигабайтный режим)",
     "min_purchase_gb": "Минимальная покупка трафика (ГБ)",
+    "trial_gb": "Пробный трафик (ГБ, в гигабайтном режиме вместо часов)",
     "inactive_months_off": "Отключать за неактивность (месяцев без расхода трафика, 0 = не отключать)",
     "site_banner_html": "Пользовательский рекламный HTML (не отображается на публичных страницах до проверки)",
     "analytics_html": "HTML-код аналитики/счётчика (вставляется перед </body> всех страниц)",
@@ -292,7 +293,7 @@ async def admin_servers(request: Request):
     if not _admin_tg(request):
         return RedirectResponse(url="/login")
     servers = []
-    for s_id, ip, port, active, name, max_users, p1, p7, p30 in db.get_all_servers_full():
+    for s_id, ip, port, active, name, max_users, p1, p7, p30, p_gb in db.get_all_servers_full():
         paid = db.count_paid_users_on_server(s_id) or 0
         subs_total = db.count_server_subs(s_id)
         subs_active = db.count_server_subs(s_id, only_active=True)
@@ -300,6 +301,7 @@ async def admin_servers(request: Request):
             "id": s_id, "ip": ip, "port": port, "active": bool(active),
             "name": name, "limit": max_users, "paid": paid,
             "price_1d": p1, "price_7d": p7, "price_30d": p30,
+            "price_1gb": p_gb,
             "subs_total": subs_total, "subs_active": subs_active,
         })
     autoupdate = (db.get_setting("container_autoupdate") or "").strip().lower() == "on"
@@ -342,6 +344,7 @@ async def admin_server_update(
     price_1d: int = Form(0),
     price_7d: int = Form(0),
     price_30d: int = Form(0),
+    price_1gb: float = Form(0),
     active: str = Form(""),
     is_free: str = Form(""),
 ):
@@ -353,6 +356,8 @@ async def admin_server_update(
         for period, price in (("price_1d", price_1d), ("price_7d", price_7d), ("price_30d", price_30d)):
             if int(price) > 0:
                 db.update_server_price(server_id, period, int(price))
+        if float(price_1gb) > 0:
+            db.update_server_price(server_id, "price_1gb", float(price_1gb))
         db.set_server_active(server_id, active == "1")
         db.set_server_free(server_id, is_free == "on")
         return _back("/admin/web/servers", msg=f"Сервер #{server_id} обновлен.")

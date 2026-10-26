@@ -103,14 +103,21 @@ def period_label(period):
         return f"{gb} ГБ"
     return {"trial": "Пробный", "1d": "1 день", "7d": "7 дней", "30d": "30 дней"}.get(period, str(period))
 
-def get_price_for_period(server, period):
-    """server - кортеж из db.get_server_by_id (ip, port, name, limit, price_1d, price_7d, price_30d)
+def get_gb_price(server):
+    """Цена 1 ГБ для сервера: своя (price_1gb), если задана, иначе глобальная."""
+    sp_gb = server[7] if server and len(server) > 7 else None
+    if sp_gb is not None and float(sp_gb) > 0:
+        return int(sp_gb)
+    return int(db.get_setting("gb_price_rub") or 0)
 
-    Для погигабайтных покупок ("10gb") цена = ГБ x настройка gb_price_rub
-    (серверные цены периодов на гигабайты не влияют)."""
+def get_price_for_period(server, period):
+    """server - кортеж из db.get_server_by_id (ip, port, name, limit, price_1d, price_7d, price_30d, price_1gb)
+
+    Для погигабайтных покупок ("10gb") цена = ГБ x цена 1 ГБ сервера
+    (своя price_1gb либо глобальная настройка gb_price_rub)."""
     gb = parse_gb_token(period)
     if gb is not None:
-        return gb * int(db.get_setting("gb_price_rub") or 0)
+        return gb * get_gb_price(server)
     sp1, sp7, sp30 = server[4], server[5], server[6]
     if period == "1d":
         return int(sp1 if sp1 is not None else db.get_setting("price_1d"))
@@ -485,7 +492,8 @@ async def buy_menu(callback: CallbackQuery):
     u = db.get_user_sub(callback.from_user.id, s_id)
     
     server = db.get_server_by_id(s_id)
-    ip, port, srv_name, limit, sp1, sp7, sp30 = server
+    ip, port, srv_name, limit = server[0], server[1], server[2], server[3]
+    sp1, sp7, sp30 = server[4], server[5], server[6]
 
     can_take_trial = True
     if u and u[5] == 1: 
@@ -506,9 +514,10 @@ async def buy_menu(callback: CallbackQuery):
 
     # === ПОГИГАБАЙТНЫЙ РЕЖИМ: продаем гигабайты, а не периоды ===
     if db.get_billing_mode() == "traffic":
-        gb_price = int(db.get_setting("gb_price_rub") or 0)
+        gb_price = get_gb_price(server)
         min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
         months_off = int(db.get_setting("inactive_months_off") or 0)
+        trial_gb = float(db.get_setting("trial_gb") or 0)
 
         text = (
             f"🛍 <b>ПОКУПКА ТРАФИКА</b>\n📍 Локация: {srv_name}\n\n"
@@ -521,8 +530,9 @@ async def buy_menu(callback: CallbackQuery):
             text += (f"\n\n<i>⚠️ Если сервис не используется (трафик не расходуется) "
                      f"{months_off} мес. — доступ отключается.</i>")
 
-        if can_take_trial:
-            builder.add(InlineKeyboardButton(text=f"🎁 Бесплатный тест ({t_hours}ч)", callback_data=f"pay_success_{s_id}_trial"))
+        if can_take_trial and trial_gb > 0:
+            builder.add(InlineKeyboardButton(
+                text=f"🎁 Бесплатный тест ({trial_gb:g} ГБ)", callback_data=f"pay_success_{s_id}_trial"))
         else:
             text += "\n\n<i>⚠️ Бесплатный тест недоступен. Он выдается 1 раз в 30 дней при отсутствии активной подписки.</i>"
 
@@ -588,7 +598,7 @@ async def gb_custom_ask(callback: CallbackQuery, state: FSMContext):
     """Погигабайтная покупка: пользователь вводит желаемое количество ГБ."""
     s_id = int(callback.data.replace("gb_custom_", ""))
     min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
-    gb_price = int(db.get_setting("gb_price_rub") or 0)
+    gb_price = get_gb_price(db.get_server_by_id(s_id))
     await state.update_data(gb_srv_id=s_id)
     await state.set_state(BuyStates.waiting_for_gb_amount)
     await callback.message.edit_text(
@@ -804,7 +814,7 @@ async def show_help(callback: CallbackQuery):
         gb_price = int(db.get_setting("gb_price_rub") or 0)
         min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
         about_sub = (
-            f"📶 <b>О подписке:</b> сервис продает трафик — 1 ГБ = {gb_price} руб., минимальная покупка "
+            f"📶 <b>О подписке:</b> сервис продает трафик — 1 ГБ от {gb_price} руб. (цена зависит от сервера), минимальная покупка "
             f"{min_gb} ГБ. Оплаченные гигабайты не сгорают по времени: доступ действует, пока есть "
             f"непотраченный трафик. Остаток виден в «👤 Мой профиль» и в личном кабинете на сайте. "
             f"Когда гигабайты подходят к концу — просто купите новые."
@@ -950,47 +960,52 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
 
     return True, config_text
 
-async def _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, gb_amount, notify_admin):
-    """Погигабайтная покупка: зачислить ГБ на кошелек и (если доступа нет) выдать конфиг.
+async def _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, gb_amount, notify_admin, is_trial=False):
+    """Погигабайтная выдача: зачислить ГБ на кошелек и (если доступа нет) выдать конфиг.
 
     Если подписка уже активна - просто пополняем кошелек (конфиг не трогаем).
     Если доступ выключен - сначала возвращаем ПРЕЖНИЙ конфиг теми же ключами
     (как при повторной выдаче по срокам), новый генерируем только если старый
-    вернуть нельзя."""
+    вернуть нельзя. is_trial=True - бесплатный пробный трафик."""
+    gb_txt = f"{gb_amount:g} ГБ"
+    title = "🎁 Пробный трафик" if is_trial else "✅ Гигабайты куплены"
     user = db.get_user_sub(tg_id, server_id)
     if user and user[5] == 1:
-        balance = db.grant_gb(tg_id, server_id, username, gb_amount)
+        balance = db.grant_gb(tg_id, server_id, username, gb_amount, is_trial=True if is_trial else False)
         try:
             await bot.send_message(
                 tg_id,
-                f"✅ <b>Гигабайты куплены!</b>\n\n"
+                f"{title}!\n\n"
                 f"Сервер: <b>{srv_name}</b>\n"
-                f"Куплено: <b>{gb_amount} ГБ</b>\n"
+                f"{'Начислено' if is_trial else 'Куплено'}: <b>{gb_txt}</b>\n"
                 f"Остаток: <b>{balance:.2f} ГБ</b>\n\n"
                 f"Ваш конфиг прежний — скачивать ничего не нужно.",
                 parse_mode="HTML")
         except Exception as _e:
             print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
-        await _notify_admin_grant(bot, tg_id, srv_name, f"{gb_amount}gb", renewed=True, notify_admin=notify_admin)
+        await _notify_admin_grant(bot, tg_id, srv_name, "trial" if is_trial else f"{gb_amount}gb",
+                                  renewed=True, notify_admin=notify_admin)
         return True, "Гигабайты добавлены"
 
     existing_cfg = db.get_user_config(tg_id, server_id)
     if existing_cfg:
         reused, reuse_detail = await traffic_module.restore_peer(ip, port, username, existing_cfg)
         if reused:
-            balance = db.grant_gb(tg_id, server_id, username, gb_amount, config_text=existing_cfg)
+            balance = db.grant_gb(tg_id, server_id, username, gb_amount, config_text=existing_cfg,
+                                  is_trial=True if is_trial else False)
             try:
                 await bot.send_message(
                     tg_id,
-                    f"✅ <b>Доступ предоставлен!</b>\n\n"
+                    f"{title}!\n\n"
                     f"Сервер: <b>{srv_name}</b>\n"
-                    f"Куплено: <b>{gb_amount} ГБ</b>\n"
+                    f"{'Начислено' if is_trial else 'Куплено'}: <b>{gb_txt}</b>\n"
                     f"Остаток: <b>{balance:.2f} ГБ</b>\n\n"
                     f"Ваш прежний конфиг продолжает работать — скачивать и импортировать новый не нужно!",
                     parse_mode="HTML")
             except Exception as _e:
                 print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
-            await _notify_admin_grant(bot, tg_id, srv_name, f"{gb_amount}gb", renewed=True, notify_admin=notify_admin)
+            await _notify_admin_grant(bot, tg_id, srv_name, "trial" if is_trial else f"{gb_amount}gb",
+                                      renewed=True, notify_admin=notify_admin)
             return True, "Выдано (прежний конфиг)"
         print(f"⚠️ user_handlers: не удалось вернуть прежний конфиг {tg_id}: {reuse_detail} - генерирую новый")
 
@@ -999,15 +1014,16 @@ async def _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, 
     if not config_text or "Ошибка" in config_text:
         return False, config_text if config_text else "Пустой ответ (Таймаут или ошибка подключения)"
 
-    balance = db.grant_gb(tg_id, server_id, username, gb_amount, config_text=config_text)
+    balance = db.grant_gb(tg_id, server_id, username, gb_amount, config_text=config_text,
+                          is_trial=True if is_trial else False)
     db.reset_user_traffic(tg_id, server_id, full=True)
 
     config_file = BufferedInputFile(config_text.encode('utf-8'), filename=f"ID{server_id}AWG.conf")
     try:
         await bot.send_document(
             tg_id, config_file,
-            caption=(f"✅ <b>Доступ успешно предоставлен!</b>\n\n"
-                     f"Куплено: <b>{gb_amount} ГБ</b> · Остаток: <b>{balance:.2f} ГБ</b>\n\n"
+            caption=(f"{title}!\n\n"
+                     f"{'Начислено' if is_trial else 'Куплено'}: <b>{gb_txt}</b> · Остаток: <b>{balance:.2f} ГБ</b>\n\n"
                      f"Скачайте прикрепленный файл и импортируйте его в приложение <b>AmneziaWG</b>."),
             parse_mode="HTML")
     except Exception as _e:
@@ -1023,7 +1039,8 @@ async def _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, 
         except Exception as _e:
             print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
 
-    await _notify_admin_grant(bot, tg_id, srv_name, f"{gb_amount}gb", renewed=False, notify_admin=notify_admin)
+    await _notify_admin_grant(bot, tg_id, srv_name, "trial" if is_trial else f"{gb_amount}gb",
+                              renewed=False, notify_admin=notify_admin)
     return True, "Выдано (гигабайты)"
 
 async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False, admin_grant=False):
@@ -1049,6 +1066,14 @@ async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False, ad
             if gb_amount < min_gb:
                 return False, f"Минимальная покупка — {min_gb} ГБ"
         return await _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, gb_amount, notify_admin)
+
+    # === ПРОБНЫЙ ДОСТУП В ГИГАБАЙТНОМ РЕЖИМЕ: бесплатный трафик, не часы ===
+    if period == "trial" and db.get_billing_mode() == "traffic":
+        trial_gb = float(db.get_setting("trial_gb") or 0)
+        if trial_gb <= 0:
+            return False, "Пробный трафик не настроен (настройка trial_gb)"
+        return await _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username,
+                                      trial_gb, notify_admin, is_trial=True)
 
     # === ПРОВЕРКА НА ПРОДЛЕНИЕ АКТИВНОГО КОНФИГА ===
     user = db.get_user_sub(tg_id, server_id)
@@ -1178,11 +1203,19 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
     "Подтвердить" в confirm_manual_order().
     """
     if period == "trial":
-        text = (
-            f"🎁 <b>Взят бесплатный пробный период!</b>\n\n"
-            f"Пользователь: <code>{tg_id}</code>\n"
-            f"Сервер: <b>{srv_name}</b>"
-        )
+        if db.get_billing_mode() == "traffic":
+            t_gb = float(db.get_setting("trial_gb") or 0)
+            text = (
+                f"🎁 <b>Взят бесплатный пробный трафик ({t_gb:g} ГБ)!</b>\n\n"
+                f"Пользователь: <code>{tg_id}</code>\n"
+                f"Сервер: <b>{srv_name}</b>"
+            )
+        else:
+            text = (
+                f"🎁 <b>Взят бесплатный пробный период!</b>\n\n"
+                f"Пользователь: <code>{tg_id}</code>\n"
+                f"Сервер: <b>{srv_name}</b>"
+            )
     elif notify_admin:
         p_label = period_label(period)
         action_label = "Продление подписки" if renewed else "Новая оплата"

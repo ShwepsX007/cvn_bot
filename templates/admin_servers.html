@@ -75,11 +75,11 @@
             </div>
         </div>
         <div class="row g-2 align-items-end">
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label small text-muted">Название</label>
                 <input type="text" name="name" class="form-control form-control-sm" value="{{ s.name }}">
             </div>
-            <div class="col-md-2">
+            <div class="col-md-1">
                 <label class="form-label small text-muted">Лимит мест</label>
                 <input type="number" name="max_users" class="form-control form-control-sm" value="{{ s.limit }}">
             </div>
@@ -94,6 +94,10 @@
             <div class="col-md-2">
                 <label class="form-label small text-muted">Цена 30 дней</label>
                 <input type="number" name="price_30d" class="form-control form-control-sm" value="{{ s.price_30d or '' }}" placeholder="глоб.">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted">Цена 1 ГБ</label>
+                <input type="number" step="any" name="price_1gb" class="form-control form-control-sm" value="{{ s.price_1gb or '' }}" placeholder="глоб.">
             </div>
             <div class="col-md-1">
                 <div class="form-check form-switch">

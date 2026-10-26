@@ -43,10 +43,10 @@ class FakeBot:
         self.sent.append(("msg", chat_id, text, kwargs))
 
     async def send_document(self, chat_id, file, **kwargs):
-        self.sent.append(("doc", chat_id, kwargs))
+        self.sent.append(("doc", chat_id, "", kwargs))
 
     async def send_photo(self, chat_id, photo, **kwargs):
-        self.sent.append(("photo", chat_id, kwargs))
+        self.sent.append(("photo", chat_id, "", kwargs))
 
 
 @pytest.fixture
@@ -493,3 +493,99 @@ def test_admin_pages_show_gb_balance(admin_client, fake_bot):
     assert page.status_code == 200
     assert "🪙 Гигабайты" in page.text
     assert "7.50 ГБ" in page.text
+
+
+# ---------- ПОЛНАЯ НАСТРОЙКА: ЦЕНЫ СЕРВЕРОВ И ПРОБНИК В ГИГАБАЙТАХ ----------
+
+def test_per_server_gb_price_overrides_global():
+    enable_gb_mode()
+    db.update_setting("gb_price_rub", "50")
+    sid = add_server()
+
+    # без своей цены - глобальная
+    server = db.get_server_by_id(sid)
+    assert user_handlers.get_price_for_period(server, "10gb") == 500
+
+    # своя цена 1 ГБ у сервера
+    db.update_server_price(sid, "price_1gb", 80)
+    server = db.get_server_by_id(sid)
+    assert user_handlers.get_gb_price(server) == 80
+    assert user_handlers.get_price_for_period(server, "10gb") == 800
+    assert user_handlers.get_price_for_period(server, "3gb") == 240
+
+
+def test_admin_can_set_server_gb_price_web(admin_client, fake_bot):
+    """Цена 1 ГБ редактируется в карточке сервера на сайте."""
+    enable_gb_mode()
+    sid = add_server()
+    r = admin_client.post("/admin/web/servers/update",
+                          data={"server_id": sid, "name": "🇳🇱 NL", "max_users": "50",
+                                "price_1d": "0", "price_7d": "0", "price_30d": "0",
+                                "price_1gb": "99.5", "active": "1"},
+                          follow_redirects=True)
+    assert r.status_code == 200
+    assert db.get_server_by_id(sid)[7] == 99.5
+
+
+@pytest.mark.asyncio
+async def test_trial_gb_in_traffic_mode(fake_bot):
+    """В гигабайтном режиме пробник - бесплатный трафик, не часы."""
+    enable_gb_mode()
+    db.update_setting("trial_gb", "2")
+    sid = add_server()
+
+    fake_ssh = fake_ssh_factory(lambda cmd: FAKE_CFG if "add_user.sh" in cmd else "ok")
+    with mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        ok, msg = await user_handlers.issue_vpn_access(fake_bot, 111, sid, "trial")
+
+    assert ok
+    assert db.get_user_balance(111, sid) == 2          # 2 ГБ, а не сутки
+    sub = db.get_user_sub(111, sid)
+    assert sub[6] == 1                                 # is_trial
+    assert sub[4] == 1                                 # has_used_trial
+    # уведомление: текстом и/или подписью к файлу конфига
+    notes = [s[2] for s in fake_bot.sent if s[0] == "msg"] + \
+            [s[3].get("caption", "") for s in fake_bot.sent if s[0] in ("doc", "photo")]
+    assert any("Пробный трафик" in t for t in notes)
+
+    # последующая покупка снимает метку пробного
+    with mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        ok, _ = await user_handlers.issue_vpn_access(fake_bot, 111, sid, "5gb")
+    assert ok
+    assert db.get_user_balance(111, sid) == 7
+    assert db.get_user_sub(111, sid)[6] == 0            # больше не пробный
+
+
+@pytest.mark.asyncio
+async def test_trial_hours_unchanged_in_time_mode(fake_bot):
+    """В режиме по срокам пробник остался часовым, кошелек не трогается."""
+    sid = add_server()  # billing_mode = time
+    db.update_setting("trial_hours", "24")
+    fake_ssh = fake_ssh_factory(lambda cmd: FAKE_CFG if "add_user.sh" in cmd else "ok")
+    with mock.patch("ssh_manager.run_ssh_command", fake_ssh):
+        ok, msg = await user_handlers.issue_vpn_access(fake_bot, 111, sid, "trial")
+    assert ok
+    assert db.get_user_balance(111, sid) == 0
+    sub = db.get_user_sub(111, sid)
+    assert sub[6] == 1                                  # is_trial
+    from user_handlers import parse_date
+    hours_left = (parse_date(sub[3]) - __import__("datetime").datetime.now()).total_seconds() / 3600
+    assert 20 < hours_left <= 25                        # сутки, а не гигабайты
+
+
+def test_dashboard_per_server_price_and_trial_gb(client):
+    """В кабинете кнопки показывают цену СЕРВЕРА и пробник в гигабайтах."""
+    enable_gb_mode()
+    db.update_setting("trial_gb", "2")
+    db.update_setting("gb_price_rub", "50")
+    sid = add_server()
+    db.update_server_price(sid, "price_1gb", 80)
+    db.update_user_profile(42, "Test", "tester")
+    db.accept_tos(42)
+
+    login(client, 42)
+    page = client.get("/dashboard")
+    assert page.status_code == 200
+    assert "Тест (2 ГБ)" in page.text
+    assert "1 ГБ — 80 руб." in page.text              # цена сервера, не глобальная
+    assert "800 руб." in page.text                     # min_gb(5) x 80

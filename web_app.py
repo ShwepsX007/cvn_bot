@@ -1029,6 +1029,8 @@ async def dashboard(request: Request):
                 "id": s_id, "name": name,
                 "free_slots": max(limit - paid_count, 0),
                 "price_1d": p1, "price_7d": p7, "price_30d": p30,
+                # своя цена 1 ГБ сервера (погигабайтный режим), иначе глобальная
+                "gb_price": (int(srv_full[7]) if srv_full[7] else int(bot_db.get_setting("gb_price_rub") or 0)),
                 "can_trial": can_trial
             })
 
@@ -1067,6 +1069,7 @@ async def dashboard(request: Request):
             "billing_gb": billing_gb,
             "gb_price": int(bot_db.get_setting("gb_price_rub") or 0),
             "min_gb": max(1, int(bot_db.get_setting("min_purchase_gb") or 1)),
+            "trial_gb": float(bot_db.get_setting("trial_gb") or 0),
             "inactive_months": int(bot_db.get_setting("inactive_months_off") or 0),
             # кнопка автооплаты рисуется, только если провайдер включен (payments.py)
             "auto_pay_enabled": payments.is_auto_pay_enabled(),
