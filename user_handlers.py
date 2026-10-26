@@ -88,8 +88,29 @@ def parse_date(date_str):
     except Exception:
         return datetime.now()
 
+def parse_gb_token(period):
+    """Погигабайтный токен периода "10gb" -> 10; обычные токены (1d/7d/30d/trial) -> None."""
+    if isinstance(period, str) and period.endswith("gb"):
+        digits = period[:-2]
+        if digits.isdigit():
+            return int(digits)
+    return None
+
+def period_label(period):
+    """Человекочитаемое имя покупки: "10gb" -> «10 ГБ», "30d" -> «30 дней» и т.д."""
+    gb = parse_gb_token(period)
+    if gb is not None:
+        return f"{gb} ГБ"
+    return {"trial": "Пробный", "1d": "1 день", "7d": "7 дней", "30d": "30 дней"}.get(period, str(period))
+
 def get_price_for_period(server, period):
-    """server - кортеж из db.get_server_by_id (ip, port, name, limit, price_1d, price_7d, price_30d)"""
+    """server - кортеж из db.get_server_by_id (ip, port, name, limit, price_1d, price_7d, price_30d)
+
+    Для погигабайтных покупок ("10gb") цена = ГБ x настройка gb_price_rub
+    (серверные цены периодов на гигабайты не влияют)."""
+    gb = parse_gb_token(period)
+    if gb is not None:
+        return gb * int(db.get_setting("gb_price_rub") or 0)
     sp1, sp7, sp30 = server[4], server[5], server[6]
     if period == "1d":
         return int(sp1 if sp1 is not None else db.get_setting("price_1d"))
@@ -104,6 +125,7 @@ class SupportStates(StatesGroup):
 
 class BuyStates(StatesGroup):
     waiting_for_receipt = State()
+    waiting_for_gb_amount = State()
 
 class EmailLinkStates(StatesGroup):
     waiting_for_email = State()
@@ -135,12 +157,17 @@ async def check_and_clean_expired(tg_id: int):
     if not subs: return "not_found"
 
     has_expired = False
+    billing_gb = db.get_billing_mode() == "traffic"
     for sub in subs:
         t_id, s_id, uname, exp_date_str, has_trial, active, is_trial, notif, last_exp = sub
         if exp_date_str and active == 1:
             try:
                 expire_date = parse_date(exp_date_str)
                 if datetime.now() > expire_date:
+                    # Погигабайтная тарификация: срок мог выйти, но доступ живет,
+                    # пока есть неизрасходованные гигабайты.
+                    if billing_gb and (db.get_user_balance(t_id, s_id) or 0) > 0:
+                        continue
                     server = db.get_server_by_id(s_id)
                     if server:
                         ip, port = server[0], server[1]
@@ -380,10 +407,13 @@ async def show_profile(callback: CallbackQuery):
             hours_left = round((expire_date - datetime.now()).seconds / 3600, 1)
             srv = db.get_server_by_id(s_id)
             srv_name = srv[2] if srv else f"ID {s_id}"
-            
+
             text += f"🖥 <b>Сервер: {srv_name}</b>\n"
-            text += f"📅 Активно до: {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
-            text += f"⏳ Осталось: {days_left} дн. ({hours_left} ч.)\n"
+            if days_left >= 0:
+                text += f"📅 Активно до: {expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+                text += f"⏳ Осталось: {days_left} дн. ({hours_left} ч.)\n"
+            else:
+                text += "📅 Доступ по гигабайтам (срок тарифа вышел)\n"
             # Лимит трафика подписки (0/None = без ограничений)
             tr = db.get_user_traffic(callback.from_user.id, s_id)
             if tr:
@@ -393,6 +423,10 @@ async def show_profile(callback: CallbackQuery):
                     text += f"📊 Трафик: {traffic_module.format_bytes(used_bytes)} из {traffic_module.format_bytes(limit_bytes)}\n"
                 elif used_bytes:
                     text += f"📊 Трафик: {traffic_module.format_bytes(used_bytes)} (без ограничений)\n"
+            # Погигабайтная тарификация: остаток оплаченных ГБ
+            if db.get_billing_mode() == "traffic":
+                balance = db.get_user_balance(callback.from_user.id, s_id)
+                text += f"🪙 Остаток трафика: <b>{balance:.2f} ГБ</b>\n"
             if is_trial == 1:
                 text += "🎁 <i>Пробный период</i>\n"
             text += "\n"
@@ -467,37 +501,70 @@ async def buy_menu(callback: CallbackQuery):
     p1 = sp1 if sp1 is not None else db.get_setting("price_1d")
     p7 = sp7 if sp7 is not None else db.get_setting("price_7d")
     p30 = sp30 if sp30 is not None else db.get_setting("price_30d")
-    
-    text = f"🛍 <b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n📍 Локация: {srv_name}\n\nВыберите желаемый период использования:\n\n<i>Доступ действует на выбранный срок и в пределах лимита трафика — что закончится раньше. После оплаты вы получаете новый срок и свежий лимит.</i>"
-    
+
     builder = InlineKeyboardBuilder()
+
+    # === ПОГИГАБАЙТНЫЙ РЕЖИМ: продаем гигабайты, а не периоды ===
+    if db.get_billing_mode() == "traffic":
+        gb_price = int(db.get_setting("gb_price_rub") or 0)
+        min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
+        months_off = int(db.get_setting("inactive_months_off") or 0)
+
+        text = (
+            f"🛍 <b>ПОКУПКА ТРАФИКА</b>\n📍 Локация: {srv_name}\n\n"
+            f"1 ГБ — <b>{gb_price} руб.</b>\n"
+            f"Минимальная покупка — <b>{min_gb} ГБ</b>.\n\n"
+            f"Оплаченные гигабайты не сгорают по времени: доступ действует, пока есть "
+            f"непотраченный трафик. Сколько осталось — всегда видно в профиле и на сайте."
+        )
+        if months_off > 0:
+            text += (f"\n\n<i>⚠️ Если сервис не используется (трафик не расходуется) "
+                     f"{months_off} мес. — доступ отключается.</i>")
+
+        if can_take_trial:
+            builder.add(InlineKeyboardButton(text=f"🎁 Бесплатный тест ({t_hours}ч)", callback_data=f"pay_success_{s_id}_trial"))
+        else:
+            text += "\n\n<i>⚠️ Бесплатный тест недоступен. Он выдается 1 раз в 30 дней при отсутствии активной подписки.</i>"
+
+        for mult in (1, 2, 5):
+            amount_gb = min_gb * mult
+            builder.add(InlineKeyboardButton(
+                text=f"📶 {amount_gb} ГБ — {amount_gb * gb_price} руб.",
+                callback_data=f"pay_req_{s_id}_{amount_gb}gb"))
+        builder.add(InlineKeyboardButton(text="⌨️ Другое количество", callback_data=f"gb_custom_{s_id}"))
+        builder.add(InlineKeyboardButton(text="⬅️ Выбрать другой сервер", callback_data="usr_buy_choose_srv"))
+        builder.adjust(1)
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        return
+
+    text = f"🛍 <b>ОФОРМЛЕНИЕ ПОДПИСКИ</b>\n📍 Локация: {srv_name}\n\nВыберите желаемый период использования:\n\n<i>Доступ действует на выбранный срок и в пределах лимита трафика — что закончится раньше. После оплаты вы получаете новый срок и свежий лимит.</i>"
+
     if can_take_trial:
         builder.add(InlineKeyboardButton(text=f"🎁 Бесплатный тест ({t_hours}ч)", callback_data=f"pay_success_{s_id}_trial"))
     else:
         text += "\n\n<i>⚠️ Бесплатный тест недоступен. Он выдается 1 раз в 30 дней при отсутствии активной подписки.</i>"
-    
+
     builder.add(InlineKeyboardButton(text=f"⏳ 1 День — {p1} руб.", callback_data=f"pay_req_{s_id}_1d"))
     builder.add(InlineKeyboardButton(text=f"⏳ 7 Дней — {p7} руб.", callback_data=f"pay_req_{s_id}_7d"))
     builder.add(InlineKeyboardButton(text=f"⏳ 30 Дней — {p30} руб.", callback_data=f"pay_req_{s_id}_30d"))
     builder.add(InlineKeyboardButton(text="⬅️ Выбрать другой сервер", callback_data="usr_buy_choose_srv"))
     builder.adjust(1)
-    
+
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-@user_router.callback_query(F.data.startswith("pay_req_"))
-async def ask_for_details_prompt(callback: CallbackQuery):
-    _, _, s_id, period = callback.data.split("_")
+def _payment_method_menu(s_id, period):
+    """Текст и кнопки выбора способа оплаты (общие для тарифов и гигабайт)."""
     auto_enabled = payments.is_auto_pay_enabled()
     if auto_enabled:
         text = (
-            "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
+            f"💳 <b>ОПЛАТА — {period_label(period)}</b>\n\n"
             "⚡️ <b>Онлайн-оплата (авто)</b> — доступ выдается автоматически сразу после оплаты.\n"
             "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
             "<i>Выберите удобный способ оплаты.</i>"
         )
     else:
         text = (
-            "💳 <b>ОПЛАТА ТАРИФА</b>\n\n"
+            f"💳 <b>ОПЛАТА — {period_label(period)}</b>\n\n"
             "📥 <b>Запрос реквизитов</b> — ручной перевод с подтверждением администратора.\n\n"
             "<i>⚡️ Автоматическая онлайн-оплата временно недоступна.</i>"
         )
@@ -507,7 +574,51 @@ async def ask_for_details_prompt(callback: CallbackQuery):
     builder.add(InlineKeyboardButton(text="📥 Запрос реквизитов", callback_data=f"ask_det_{s_id}_{period}"))
     builder.add(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"buy_srv_{s_id}"))
     builder.adjust(1)
-    await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    return text, builder.as_markup()
+
+@user_router.callback_query(F.data.startswith("pay_req_"))
+async def ask_for_details_prompt(callback: CallbackQuery):
+    _, _, s_id, period = callback.data.split("_")
+    text, markup = _payment_method_menu(s_id, period)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+
+
+@user_router.callback_query(F.data.startswith("gb_custom_"))
+async def gb_custom_ask(callback: CallbackQuery, state: FSMContext):
+    """Погигабайтная покупка: пользователь вводит желаемое количество ГБ."""
+    s_id = int(callback.data.replace("gb_custom_", ""))
+    min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
+    gb_price = int(db.get_setting("gb_price_rub") or 0)
+    await state.update_data(gb_srv_id=s_id)
+    await state.set_state(BuyStates.waiting_for_gb_amount)
+    await callback.message.edit_text(
+        f"⌨️ <b>СВОЁ КОЛИЧЕСТВО ГИГАБАЙТ</b>\n\n"
+        f"1 ГБ — <b>{gb_price} руб.</b>\n"
+        f"Минимальная покупка — <b>{min_gb} ГБ</b>.\n\n"
+        f"Введите число гигабайт (целое, например <code>{min_gb}</code> или <code>{min_gb * 3}</code>):",
+        parse_mode="HTML")
+    await callback.answer()
+
+
+@user_router.message(BuyStates.waiting_for_gb_amount)
+async def gb_custom_amount(message: Message, state: FSMContext):
+    data = await state.get_data()
+    s_id = data.get("gb_srv_id")
+    text = (message.text or "").strip().replace(",", ".")
+    min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
+    if not text.isdigit() or int(text) < 1:
+        await message.answer("Введите целое число гигабайт, например 10.")
+        return
+    gb_amount = int(text)
+    if gb_amount < min_gb:
+        await message.answer(f"Минимальная покупка — {min_gb} ГБ. Введите число не меньше.")
+        return
+    if gb_amount > 100000:
+        await message.answer("Слишком большое количество. Если нужен большой объем — напишите в поддержку.")
+        return
+    await state.clear()
+    menu_text, markup = _payment_method_menu(s_id, f"{gb_amount}gb")
+    await message.answer(menu_text, reply_markup=markup, parse_mode="HTML")
 
 @user_router.callback_query(F.data.startswith("autopay_"))
 async def autopay_create(callback: CallbackQuery):
@@ -616,7 +727,7 @@ async def send_details_request_to_admin(callback: CallbackQuery):
         f"Клиент: <b>{full_name}</b>{username_str}\n"
         f"ID: <code>{tg_id}</code>\n"
         f"Сервер ID: <b>{s_id}</b>\n"
-        f"Период: <b>{period}</b>\n\n"
+        f"Период: <b>{period_label(period)}</b>\n\n"
         f"Выдать пользователю реквизиты?"
     )
     
@@ -658,7 +769,7 @@ async def receive_receipt(message: Message, state: FSMContext):
         f"Клиент: <b>{full_name}</b>{username_str}\n"
         f"ID: <code>{message.from_user.id}</code>\n"
         f"Сервер ID: {s_id}\n"
-        f"Период: {period}\n"
+        f"Период: {period_label(period)}\n"
         f"Сумма: {amount} руб.\n\n"
         f"Проверьте чек и подтвердите выдачу."
     )
@@ -689,6 +800,21 @@ async def grant_trial_access(callback: CallbackQuery):
 
 @user_router.callback_query(F.data == "usr_help")
 async def show_help(callback: CallbackQuery):
+    if db.get_billing_mode() == "traffic":
+        gb_price = int(db.get_setting("gb_price_rub") or 0)
+        min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
+        about_sub = (
+            f"📶 <b>О подписке:</b> сервис продает трафик — 1 ГБ = {gb_price} руб., минимальная покупка "
+            f"{min_gb} ГБ. Оплаченные гигабайты не сгорают по времени: доступ действует, пока есть "
+            f"непотраченный трафик. Остаток виден в «👤 Мой профиль» и в личном кабинете на сайте. "
+            f"Когда гигабайты подходят к концу — просто купите новые."
+        )
+    else:
+        about_sub = (
+            "📶 <b>О подписке:</b> доступ действует на срок тарифа и в пределах лимита трафика — "
+            "что закончится раньше. Текущий расход и лимит видны в «👤 Мой профиль» и в личном кабинете на сайте. "
+            "Когда срок или лимит подходит к концу, мы предупредим; для продолжения просто продлите подписку."
+        )
     text = (
         "📚 <b>ИНСТРУКЦИЯ ПО НАСТРОЙКЕ:</b>\n\n"
         "1️⃣ <b>Скачайте приложение AmneziaWG</b> на ваше устройство по ссылкам ниже:\n"
@@ -698,9 +824,7 @@ async def show_help(callback: CallbackQuery):
         "2️⃣ <b>Сохраните файл конфигурации</b> <code>.conf</code>, который бот прислал вам после оплаты или оформления пробного периода.\n\n"
         "3️⃣ Откройте приложение <b>AmneziaWG</b>, нажмите кнопку <b>«Добавить туннель»</b> (или знак ➕) и выберите скачанный файл.\n\n"
         "4️⃣ Включите переключатель. <b>Готово!</b> Подключение настроено в приложении. 🌍\n\n"
-        "📶 <b>О подписке:</b> доступ действует на срок тарифа и в пределах лимита трафика — "
-        "что закончится раньше. Текущий расход и лимит видны в «👤 Мой профиль» и в личном кабинете на сайте. "
-        "Когда срок или лимит подходит к концу, мы предупредим; для продолжения просто продлите подписку."
+        + about_sub
     )
     builder = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⬅️ В меню", callback_data="usr_menu"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML", disable_web_page_preview=True)
@@ -826,13 +950,99 @@ async def reissue_config_for_active_sub(bot, tg_id, server_id):
 
     return True, config_text
 
+async def _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, gb_amount, notify_admin):
+    """Погигабайтная покупка: зачислить ГБ на кошелек и (если доступа нет) выдать конфиг.
+
+    Если подписка уже активна - просто пополняем кошелек (конфиг не трогаем).
+    Если доступ выключен - сначала возвращаем ПРЕЖНИЙ конфиг теми же ключами
+    (как при повторной выдаче по срокам), новый генерируем только если старый
+    вернуть нельзя."""
+    user = db.get_user_sub(tg_id, server_id)
+    if user and user[5] == 1:
+        balance = db.grant_gb(tg_id, server_id, username, gb_amount)
+        try:
+            await bot.send_message(
+                tg_id,
+                f"✅ <b>Гигабайты куплены!</b>\n\n"
+                f"Сервер: <b>{srv_name}</b>\n"
+                f"Куплено: <b>{gb_amount} ГБ</b>\n"
+                f"Остаток: <b>{balance:.2f} ГБ</b>\n\n"
+                f"Ваш конфиг прежний — скачивать ничего не нужно.",
+                parse_mode="HTML")
+        except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
+        await _notify_admin_grant(bot, tg_id, srv_name, f"{gb_amount}gb", renewed=True, notify_admin=notify_admin)
+        return True, "Гигабайты добавлены"
+
+    existing_cfg = db.get_user_config(tg_id, server_id)
+    if existing_cfg:
+        reused, reuse_detail = await traffic_module.restore_peer(ip, port, username, existing_cfg)
+        if reused:
+            balance = db.grant_gb(tg_id, server_id, username, gb_amount, config_text=existing_cfg)
+            try:
+                await bot.send_message(
+                    tg_id,
+                    f"✅ <b>Доступ предоставлен!</b>\n\n"
+                    f"Сервер: <b>{srv_name}</b>\n"
+                    f"Куплено: <b>{gb_amount} ГБ</b>\n"
+                    f"Остаток: <b>{balance:.2f} ГБ</b>\n\n"
+                    f"Ваш прежний конфиг продолжает работать — скачивать и импортировать новый не нужно!",
+                    parse_mode="HTML")
+            except Exception as _e:
+                print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
+            await _notify_admin_grant(bot, tg_id, srv_name, f"{gb_amount}gb", renewed=True, notify_admin=notify_admin)
+            return True, "Выдано (прежний конфиг)"
+        print(f"⚠️ user_handlers: не удалось вернуть прежний конфиг {tg_id}: {reuse_detail} - генерирую новый")
+
+    cmd = f"bash /root/add_user.sh {shlex.quote(username)}"
+    config_text = await ssh.run_ssh_command(ip, port, cmd)
+    if not config_text or "Ошибка" in config_text:
+        return False, config_text if config_text else "Пустой ответ (Таймаут или ошибка подключения)"
+
+    balance = db.grant_gb(tg_id, server_id, username, gb_amount, config_text=config_text)
+    db.reset_user_traffic(tg_id, server_id, full=True)
+
+    config_file = BufferedInputFile(config_text.encode('utf-8'), filename=f"ID{server_id}AWG.conf")
+    try:
+        await bot.send_document(
+            tg_id, config_file,
+            caption=(f"✅ <b>Доступ успешно предоставлен!</b>\n\n"
+                     f"Куплено: <b>{gb_amount} ГБ</b> · Остаток: <b>{balance:.2f} ГБ</b>\n\n"
+                     f"Скачайте прикрепленный файл и импортируйте его в приложение <b>AmneziaWG</b>."),
+            parse_mode="HTML")
+    except Exception as _e:
+        print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
+
+    qr_png = qrgen.make_qr_png(config_text)
+    if qr_png:
+        try:
+            await bot.send_photo(
+                tg_id,
+                BufferedInputFile(qr_png, filename="access_qr.png"),
+                caption="📱 Этот же конфиг QR-кодом. В приложении AmneziaWG: «Добавить туннель» → «Сканировать QR-код».")
+        except Exception as _e:
+            print(f"⚠️ user_handlers: не удалось отправить сообщение {_e}")
+
+    await _notify_admin_grant(bot, tg_id, srv_name, f"{gb_amount}gb", renewed=False, notify_admin=notify_admin)
+    return True, "Выдано (гигабайты)"
+
 async def issue_vpn_access(bot, tg_id, server_id, period, notify_admin=False):
     username = f"user_{tg_id}"
     server = db.get_server_by_id(server_id)
     if not server: return False, "Сервер не найден"
-        
+
     ip, port, srv_name = server[0], server[1], server[2]
-    
+
+    # === ПОГИГАБАЙТНАЯ ПОКУПКА ("10gb") ===
+    # Пополняет кошелек ГБ. Срок существующей подписки не меняется: он (если еще
+    # действует) продолжает идти как раньше, гигабайты расходуются после его окончания.
+    gb_amount = parse_gb_token(period)
+    if gb_amount is not None:
+        min_gb = max(1, int(db.get_setting("min_purchase_gb") or 1))
+        if gb_amount < min_gb:
+            return False, f"Минимальная покупка — {min_gb} ГБ"
+        return await _grant_gb_access(bot, tg_id, server_id, srv_name, ip, port, username, gb_amount, notify_admin)
+
     # === ПРОВЕРКА НА ПРОДЛЕНИЕ АКТИВНОГО КОНФИГА ===
     user = db.get_user_sub(tg_id, server_id)
     is_active = False
@@ -967,13 +1177,13 @@ async def _notify_admin_grant(bot, tg_id, srv_name, period, renewed, notify_admi
             f"Сервер: <b>{srv_name}</b>"
         )
     elif notify_admin:
-        period_label = {"1d": "1 день", "7d": "7 дней", "30d": "30 дней"}.get(period, period)
+        p_label = period_label(period)
         action_label = "Продление подписки" if renewed else "Новая оплата"
         text = (
             f"💳 <b>{action_label} (авто)!</b>\n\n"
             f"Пользователь: <code>{tg_id}</code>\n"
             f"Сервер: <b>{srv_name}</b>\n"
-            f"Период: {period_label}"
+            f"Период: {p_label}"
         )
     else:
         return

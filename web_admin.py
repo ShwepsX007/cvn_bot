@@ -66,6 +66,10 @@ SETTING_LABELS = {
     "traffic_limit_gb": "Трафик: общий лимит по умолчанию (ГБ, 0 = без ограничений)",
     "traffic_warn_percent": "Трафик: предупреждать при использовании (%)",
     "inactive_cleanup_days": "Хранение конфигов отключенных пользователей (дней, 0 = пока числится в базе)",
+    "billing_mode": "Тарификация: time = по срокам, traffic = по гигабайтам",
+    "gb_price_rub": "Цена 1 ГБ в рублях (гигабайтный режим)",
+    "min_purchase_gb": "Минимальная покупка трафика (ГБ)",
+    "inactive_months_off": "Отключать за неактивность (месяцев без расхода трафика, 0 = не отключать)",
     "site_banner_html": "Пользовательский рекламный HTML (не отображается на публичных страницах до проверки)",
     "analytics_html": "HTML-код аналитики/счётчика (вставляется перед </body> всех страниц)",
 }
@@ -77,6 +81,15 @@ HIDDEN_SETTING_KEYS = {"container_autoupdate", "node_update_report",
                        "stats_baseline_count", "stats_baseline_sum", *PAYMENT_FORM_KEYS}
 
 PERIOD_LABELS = {"trial": "Пробный", "1d": "1 день", "7d": "7 дней", "30d": "30 дней"}
+
+def _order_period_label(period):
+    """Имя покупки для заявок: и периоды, и гигабайты ("10gb" -> «10 ГБ»)."""
+    label = PERIOD_LABELS.get(period)
+    if label:
+        return label
+    from user_handlers import parse_gb_token
+    gb = parse_gb_token(period)
+    return f"{gb} ГБ" if gb is not None else str(period)
 
 
 def _admin_tg(request: Request):
@@ -461,12 +474,12 @@ async def admin_requests(request: Request):
     for r_id, r_tg, r_srv, r_period, r_created in db.get_pending_detail_requests():
         srv = db.get_server_by_id(r_srv)
         det.append({"id": r_id, "tg_id": r_tg, "server": srv[2] if srv else f"#{r_srv}",
-                    "period": PERIOD_LABELS.get(r_period, r_period), "created": r_created})
+                    "period": _order_period_label(r_period), "created": r_created})
     man = []
     for o_id, o_tg, o_srv, o_period, o_amount, o_created in db.get_pending_manual_orders():
         srv = db.get_server_by_id(o_srv)
         man.append({"id": o_id, "tg_id": o_tg, "server": srv[2] if srv else f"#{o_srv}",
-                    "period": PERIOD_LABELS.get(o_period, o_period), "amount": o_amount, "created": o_created})
+                    "period": _order_period_label(o_period), "amount": o_amount, "created": o_created})
     return templates.TemplateResponse(request=request, name="admin_requests.html", context=_ctx(
         request, "requests", details=det, manuals=man
     ))

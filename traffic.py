@@ -167,6 +167,13 @@ async def sync_all(ssh_fn=None):
             used, delta = db.apply_user_traffic_counters(tg_id, s_id, rx, tx)
             if used is not None:
                 updated += 1
+            if used is not None and delta > 0:
+                # Гигабайтный кошелек: расходуем ГБ только когда подписка живет
+                # по гигабайтам (срок не действует). Пока идет срок - гигабайты
+                # в запасе не трогаем. Любое потребление отметает неактивность.
+                sub = db.get_user_sub(tg_id, s_id)
+                time_valid = bool(sub and sub[5] == 1 and _expire_in_future(sub[3]))
+                db.consume_gb_balance(tg_id, s_id, delta, burn=not time_valid)
     return updated
 
 

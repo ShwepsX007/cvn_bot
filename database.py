@@ -96,6 +96,18 @@ def init_db():
         # Сколько дней хранить конфиги/строки отключенных пользователей перед
         # автоматической очисткой (0 = хранить, пока пользователь числится в базе).
         ('inactive_cleanup_days', '30'),
+        # === ПОГИГАБАЙТНАЯ ТАРИФИКАЦИЯ ===
+        # Режим оплаты: time = по срокам (1д/7д/30д, как раньше), traffic = по гигабайтам.
+        # Переключение меняет только способ ПОКУПКИ: действующие сроки существующих
+        # пользователей сохраняются и после их окончания доступ живет по гигабайтам.
+        ('billing_mode', 'time'),
+        # Цена 1 ГБ в рублях (в гигабайтном режиме).
+        ('gb_price_rub', '50'),
+        # Минимальная покупка трафика в ГБ (0 = без ограничений).
+        ('min_purchase_gb', '5'),
+        # Отключать доступ, если пользователь не расходует трафик N месяцев
+        # (0 = не отключать). Действует в гигабайтном режиме.
+        ('inactive_months_off', '3'),
         # Рекламный HTML-баннер, вставляемый внизу всех публичных страниц сайта.
         # Пустая строка = «показывать стандартный баннер Amnezia Premium» (он уже в index.html).
         ('site_banner_html', ''),
@@ -217,6 +229,13 @@ def init_db():
         "ALTER TABLE users ADD COLUMN traffic_last_tx INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN traffic_warned INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN traffic_over INTEGER DEFAULT 0",
+        # === КОШЕЛЕК ГИГАБАЙТ (погигабайтная тарификация) ===
+        # traffic_balance_gb - сколько оплаченных ГБ осталось (живет, пока тратится);
+        # traffic_purchased_gb - всего куплено ГБ (для прогресса «из купленных»);
+        # traffic_last_activity - последнее потребление/покупка (отключение за неактивность).
+        "ALTER TABLE users ADD COLUMN traffic_balance_gb REAL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN traffic_purchased_gb REAL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN traffic_last_activity TIMESTAMP",
     ):
         try:
             cursor.execute(col_sql)
@@ -464,7 +483,8 @@ def add_or_update_user(tg_id, server_id, username, days=0, hours=0, is_trial=Fal
     cursor.execute(
         "SELECT expire_date, has_used_trial, last_expired, config_text, "
         "traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx, "
-        "traffic_warned, traffic_over FROM users WHERE tg_id=? AND server_id=?",
+        "traffic_warned, traffic_over, traffic_balance_gb, traffic_purchased_gb, "
+        "traffic_last_activity FROM users WHERE tg_id=? AND server_id=?",
         (tg_id, server_id))
     row = cursor.fetchone()
     
@@ -496,17 +516,21 @@ def add_or_update_user(tg_id, server_id, username, days=0, hours=0, is_trial=Fal
     prev_last_tx = (row[7] or 0) if row else 0
     prev_warned = (row[8] or 0) if row else 0
     prev_over = (row[9] or 0) if row else 0
+    prev_balance = (row[10] or 0) if row else 0
+    prev_purchased = (row[11] or 0) if row else 0
+    prev_activity = row[12] if row else None
 
     cursor.execute('''INSERT OR REPLACE INTO users 
                       (tg_id, server_id, username, expire_date, has_used_trial, active, is_trial,
                        notified_3h, notified_1d, notified_3d, last_expired, config_text,
                        traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx,
-                       traffic_warned, traffic_over) 
-                      VALUES (?, ?, ?, ?, ?, 1, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                       traffic_warned, traffic_over, traffic_balance_gb, traffic_purchased_gb,
+                       traffic_last_activity) 
+                      VALUES (?, ?, ?, ?, ?, 1, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                    (tg_id, server_id, username, new_expire, trial_flag_historic, current_trial_flag,
                     prev_last_expired, config_text,
                     prev_traffic_limit, prev_used, prev_last_rx, prev_last_tx,
-                    prev_warned, prev_over))
+                    prev_warned, prev_over, prev_balance, prev_purchased, prev_activity))
     conn.commit()
     conn.close()
 
@@ -1395,6 +1419,104 @@ def get_user_traffic(tg_id, server_id):
     row = cursor.fetchone()
     conn.close()
     return row
+
+GB_BYTES = 1024 ** 3
+
+def get_billing_mode():
+    """Режим тарификации сервиса: 'time' = по срокам (по умолчанию),
+    'traffic' = погигабайтно (покупка ГБ вместо периодов)."""
+    return "traffic" if (get_setting("billing_mode") or "time").strip() == "traffic" else "time"
+
+def get_user_gb(tg_id, server_id):
+    """(traffic_balance_gb, traffic_purchased_gb, traffic_last_activity) либо None."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT traffic_balance_gb, traffic_purchased_gb, traffic_last_activity "
+        "FROM users WHERE tg_id=? AND server_id=?",
+        (int(tg_id), int(server_id)))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def get_user_balance(tg_id, server_id):
+    """Сколько оплаченных ГБ осталось (0.0 - кошелек пуст или подписки нет)."""
+    row = get_user_gb(tg_id, server_id)
+    return (row[0] or 0) if row else 0.0
+
+def grant_gb(tg_id, server_id, username, gb, config_text=None):
+    """Зачисляет купленные гигабайты на кошелек подписки (погигабайтная тарификация).
+
+    СРОК (expire_date) не трогает: у существующих подписок он остается как был
+    (срок по времени действует до конца, гигабайты пригодятся после), у новых строк
+    ставится текущий момент - такая подписка живет, пока есть непотраченные ГБ.
+    Доступ активируется (active=1), флаг «трафик исчерпан» снимается."""
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT expire_date, has_used_trial, last_expired, config_text, is_trial, "
+        "traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx, "
+        "traffic_balance_gb, traffic_purchased_gb "
+        "FROM users WHERE tg_id=? AND server_id=?",
+        (int(tg_id), int(server_id)))
+    row = cursor.fetchone()
+    now = datetime.now()
+    if row:
+        expire_date, has_trial, last_expired, cfg, is_trial = row[0], row[1], row[2], row[3], row[4]
+        limit_gb, used, last_rx, last_tx = row[5], row[6], row[7], row[8]
+        balance, purchased = (row[9] or 0), (row[10] or 0)
+    else:
+        expire_date, has_trial, last_expired, cfg, is_trial = now, 0, None, None, 0
+        limit_gb, used, last_rx, last_tx = None, 0, 0, 0
+        balance, purchased = 0, 0
+    if config_text is None:
+        config_text = cfg
+    balance += float(gb)
+    purchased += float(gb)
+
+    cursor.execute('''INSERT OR REPLACE INTO users 
+                      (tg_id, server_id, username, expire_date, has_used_trial, active, is_trial,
+                       notified_3h, notified_1d, notified_3d, last_expired, config_text,
+                       traffic_limit_gb, traffic_used_bytes, traffic_last_rx, traffic_last_tx,
+                       traffic_warned, traffic_over, traffic_balance_gb, traffic_purchased_gb,
+                       traffic_last_activity) 
+                      VALUES (?, ?, ?, ?, ?, 1, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)''',
+                   (int(tg_id), int(server_id), username, expire_date, has_trial, is_trial,
+                    last_expired, config_text,
+                    limit_gb, used, last_rx, last_tx,
+                    balance, purchased, now))
+    conn.commit()
+    conn.close()
+    return balance
+
+def consume_gb_balance(tg_id, server_id, delta_bytes, burn=True):
+    """Учитывает израсходованный трафик в гигабайтном режиме.
+
+    burn=True - списать дельту с кошелька (подписка живет по гигабайтам, не по
+    сроку); burn=False - только отметить активность (идет сроковая подписка,
+    гигабайты в запасе не трогаем - они пригодятся после окончания срока).
+    Баланс не уходит в минус. Любое потребление обновляет отметку активности.
+    Возвращает новый баланс."""
+    if delta_bytes is None or delta_bytes <= 0:
+        return get_user_balance(tg_id, server_id)
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT traffic_balance_gb FROM users WHERE tg_id=? AND server_id=?",
+                   (int(tg_id), int(server_id)))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return 0.0
+    balance = row[0] or 0.0
+    if burn and get_billing_mode() == "traffic" and balance > 0:
+        balance = max(0.0, balance - float(delta_bytes) / GB_BYTES)
+    cursor.execute(
+        "UPDATE users SET traffic_balance_gb=?, traffic_last_activity=? "
+        "WHERE tg_id=? AND server_id=?",
+        (balance, datetime.now(), int(tg_id), int(server_id)))
+    conn.commit()
+    conn.close()
+    return balance
 
 def set_user_traffic_limit(tg_id, server_id, limit_gb):
     """Личный лимит подписки в ГБ. None = вернуться к общему по умолчанию."""

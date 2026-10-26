@@ -31,6 +31,7 @@ import traffic
 
 from bot import bot, dp, BOT_TOKEN, check_expiring_soon, check_expiring_1d, check_expiring_3d, check_expired_users, check_traffic_limits, clean_inactive_users, autoupdate_node_containers
 from user_handlers import issue_vpn_access, get_price_for_period, check_and_clean_expired, parse_date, reissue_config_for_active_sub
+from user_handlers import period_label as bot_period_label, parse_gb_token
 from admin_panel import ADMIN_ID
 
 app = FastAPI()
@@ -952,6 +953,7 @@ async def dashboard(request: Request):
     active_subs = []
     servers_info = []
     traffic_over = []  # подписки с исчерпанным лимитом трафика (баннер в кабинете)
+    billing_gb = bot_db.get_billing_mode() == "traffic"
 
     if accepted_tos:
         await check_and_clean_expired(tg_id)
@@ -963,12 +965,18 @@ async def dashboard(request: Request):
             # tr: (limit_gb, used_bytes, last_rx, last_tx, warned, over)
             limit_bytes = traffic.resolve_limit_bytes(tr[0]) if tr else 0
             used_bytes = (tr[1] or 0) if tr else 0
+            gb_row = bot_db.get_user_gb(tg_id, s_id) if billing_gb else None
+            gb_balance = (gb_row[0] or 0) if gb_row else 0
+            gb_purchased = (gb_row[1] or 0) if gb_row else 0
+            expire_dt = parse_date(exp_date_str) if exp_date_str else None
+            time_valid = bool(expire_dt and expire_dt > datetime.now())
             if tr and tr[5] == 1:
                 srv = bot_db.get_server_by_id(s_id)
                 traffic_over.append({
                     "server_name": srv[2] if srv else f"Сервер {s_id}",
                     "used_display": traffic.format_bytes(used_bytes),
                     "limit_display": traffic.format_bytes(limit_bytes),
+                    "gb_mode": billing_gb and not time_valid,
                 })
             if active == 1:
                 srv = bot_db.get_server_by_id(s_id)
@@ -980,6 +988,8 @@ async def dashboard(request: Request):
                     "expire": expire_date.strftime("%d.%m.%Y %H:%M"),
                     "is_trial": is_trial == 1,
                     "has_config": bool(bot_db.get_user_config(tg_id, s_id)),
+                    # срок еще действует, или подписка живет по гигабайтам
+                    "time_valid": time_valid,
                     # лимит трафика подписки: расход виден всегда, лимит - если задан
                     "traffic": {
                         "used_display": traffic.format_bytes(used_bytes),
@@ -987,6 +997,12 @@ async def dashboard(request: Request):
                         "percent": min(100, round(used_bytes * 100 / limit_bytes)) if limit_bytes else 0,
                         "limited": bool(limit_bytes),
                         "warned": bool(tr and tr[4] == 1),
+                        # погигабайтная тарификация: остаток оплаченных ГБ
+                        "gb_mode": billing_gb,
+                        "balance_display": f"{gb_balance:.2f} ГБ",
+                        "purchased_display": f"{gb_purchased:.2f} ГБ",
+                        "gb_percent": (min(100, round((gb_purchased - gb_balance) * 100 / gb_purchased))
+                                       if gb_purchased > 0 else 0),
                     },
                 })
 
@@ -1047,6 +1063,11 @@ async def dashboard(request: Request):
             "active_subs": active_subs,
             "servers": servers_info,
             "trial_hours": bot_db.get_setting("trial_hours"),
+            # погигабайтная тарификация: режим, цена ГБ и минимальная покупка
+            "billing_gb": billing_gb,
+            "gb_price": int(bot_db.get_setting("gb_price_rub") or 0),
+            "min_gb": max(1, int(bot_db.get_setting("min_purchase_gb") or 1)),
+            "inactive_months": int(bot_db.get_setting("inactive_months_off") or 0),
             # кнопка автооплаты рисуется, только если провайдер включен (payments.py)
             "auto_pay_enabled": payments.is_auto_pay_enabled(),
             # привязанная почта (если есть) - для карточки "Почта" в кабинете
@@ -1108,7 +1129,15 @@ async def web_create_order(request: Request):
             raise HTTPException(status_code=500, detail=msg)
         return {"success": True, "granted": True}
 
-    if period not in ("1d", "7d", "30d"):
+    gb_amount = parse_gb_token(period) if isinstance(period, str) else None
+    if gb_amount is not None:
+        # Погигабайтная покупка ("10gb"): проверяем минимальный порог и здравый смысл
+        min_gb = max(1, int(bot_db.get_setting("min_purchase_gb") or 1))
+        if gb_amount < min_gb:
+            raise HTTPException(status_code=400, detail=f"Минимальная покупка — {min_gb} ГБ")
+        if gb_amount > 100000:
+            raise HTTPException(status_code=400, detail="Слишком большое количество гигабайт")
+    elif period not in ("1d", "7d", "30d"):
         raise HTTPException(status_code=400, detail="Некорректный период")
 
     amount = get_price_for_period(server, period)
@@ -1142,7 +1171,7 @@ async def web_create_order(request: Request):
             f"ID: <code>{tg_id}</code>\n"
             f"{identity_line}"
             f"Сервер ID: <b>{server_id}</b>\n"
-            f"Период: <b>{period}</b>\n\n"
+            f"Период: <b>{bot_period_label(period)}</b>\n\n"
             f"Выдать пользователю реквизиты?"
         )
         builder = InlineKeyboardBuilder()
@@ -1218,7 +1247,7 @@ async def web_upload_receipt(request: Request, server_id: int = Form(...), perio
         f"ID: <code>{tg_id}</code>\n"
         f"{identity_line}"
         f"Сервер ID: {server_id}\n"
-        f"Период: {period}\n"
+        f"Период: {bot_period_label(period)}\n"
         f"Сумма: {amount} руб.\n\n"
         f"Проверьте чек и подтвердите выдачу."
     )

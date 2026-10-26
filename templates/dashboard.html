@@ -117,9 +117,15 @@
     {% for t in traffic_over %}
     <div class="alert alert-danger rounded-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
+            {% if t.gb_mode %}
+            ⚠️ <b>Трафик исчерпан</b> — сервер «{{ t.server_name }}»:
+            все купленные гигабайты израсходованы. Доступ отключен.
+            Чтобы продолжить — купите новые гигабайты (оплаченный трафик не сгорает по времени).
+            {% else %}
             ⚠️ <b>Лимит трафика исчерпан</b> — сервер «{{ t.server_name }}»:
             использовано {{ t.used_display }} из {{ t.limit_display }}. Доступ отключен.
             Чтобы продолжить — оплатите подписку заново (новый срок и свежий лимит трафика).
+            {% endif %}
         </div>
         <a href="#buy-section" class="btn btn-danger btn-sm rounded-pill">🛍 Продлить доступ</a>
     </div>
@@ -136,8 +142,25 @@
                         <b>{{ sub.server_name }}</b>
                         {% if sub.is_trial %}<span class="badge badge-trial ms-1">Пробный</span>{% endif %}
                         <br>
+                        {% if sub.time_valid %}
                         <small class="text-muted">Активно до: {{ sub.expire }}</small>
+                        {% else %}
+                        <small class="text-muted">📅 Доступ по гигабайтам (срок тарифа вышел)</small>
+                        {% endif %}
                         {% if sub.traffic %}
+                        {% if sub.traffic.gb_mode %}
+                        <br>
+                        <small class="text-muted">
+                            🪙 Остаток трафика: <b>{{ sub.traffic.balance_display }}</b>
+                            <span class="opacity-75">(из купленных {{ sub.traffic.purchased_display }})</span>
+                        </small>
+                        {% if sub.traffic.purchased_display %}
+                        <div class="progress mt-1" style="height:6px; max-width:260px;">
+                            <div class="progress-bar {{ 'bg-danger' if sub.traffic.gb_percent >= 100 else 'bg-success' }}"
+                                 style="width: {{ sub.traffic.gb_percent }}%"></div>
+                        </div>
+                        {% endif %}
+                        {% endif %}
                         <br>
                         <small class="text-muted">
                             📊 Трафик: <b>{{ sub.traffic.used_display }}</b>
@@ -215,6 +238,22 @@
                     <b>🌍 {{ srv.name }}</b>
                     <small class="text-muted">Свободно мест: {{ srv.free_slots }}</small>
                 </div>
+                {% if billing_gb %}
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    {% if srv.can_trial %}
+                    <button class="btn btn-warning price-btn rounded-pill fw-bold" onclick="orderTrial({{ srv.id }})">🎁 Тест ({{ trial_hours }}ч) — бесплатно</button>
+                    {% endif %}
+                    <button class="btn btn-outline-primary price-btn rounded-pill" onclick="orderGb({{ srv.id }}, {{ min_gb }})">📶 {{ min_gb }} ГБ — {{ min_gb * gb_price }} руб.</button>
+                    <button class="btn btn-outline-primary price-btn rounded-pill" onclick="orderGb({{ srv.id }}, {{ min_gb * 2 }})">📶 {{ min_gb * 2 }} ГБ — {{ min_gb * 2 * gb_price }} руб.</button>
+                    <button class="btn btn-outline-primary price-btn rounded-pill" onclick="orderGb({{ srv.id }}, {{ min_gb * 5 }})">📶 {{ min_gb * 5 }} ГБ — {{ min_gb * 5 * gb_price }} руб.</button>
+                </div>
+                <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+                    <small class="text-muted">1 ГБ — {{ gb_price }} руб., минимум {{ min_gb }} ГБ:</small>
+                    <input type="number" id="gb-amount-{{ srv.id }}" class="form-control form-control-sm" style="max-width:110px"
+                           min="{{ min_gb }}" value="{{ min_gb }}" step="1">
+                    <button class="btn btn-primary btn-sm rounded-pill" onclick="orderGbInput({{ srv.id }})">📶 Купить гигабайты</button>
+                </div>
+                {% else %}
                 <div class="d-flex flex-wrap gap-2">
                     {% if srv.can_trial %}
                     <button class="btn btn-warning price-btn rounded-pill fw-bold" onclick="orderTrial({{ srv.id }})">🎁 Тест ({{ trial_hours }}ч) — бесплатно</button>
@@ -223,6 +262,7 @@
                     <button class="btn btn-outline-primary price-btn rounded-pill" onclick="openBuyModal({{ srv.id }}, '7d', {{ srv.price_7d }})">⏳ 7 дней — {{ srv.price_7d }} руб.</button>
                     <button class="btn btn-outline-primary price-btn rounded-pill" onclick="openBuyModal({{ srv.id }}, '30d', {{ srv.price_30d }})">⏳ 30 дней — {{ srv.price_30d }} руб.</button>
                 </div>
+                {% endif %}
             </div>
             {% endfor %}
         {% else %}
@@ -259,7 +299,11 @@
                 <div class="accordion-body">
                     <p>На серверах действует лимит подключений, чтобы распределять доступ между пользователями.</p>
                     <p><b>Как это работает:</b> вы выбираете локацию, оплачиваете тариф (или берете бесплатный тест), и сервис моментально выдает конфигурационный файл.</p>
+                    {% if billing_gb %}
+                    <p><b>Гигабайты:</b> сервис продает трафик — 1 ГБ = {{ gb_price }} руб., минимальная покупка {{ min_gb }} ГБ. Оплаченные гигабайты не сгорают по времени: доступ действует, пока есть непотраченный трафик, а остаток всегда видно в разделе «Мои подписки» и в Telegram-боте. Действующие сроковые подписки сохраняются как были: сначала идет оплаченный срок, после его окончания расходуются гигабайты. {% if inactive_months > 0 %}Если трафик не расходуется {{ inactive_months }} мес. — доступ отключается, гигабайты сохраняются.{% endif %} При исчерпании трафика доступ отключается — чтобы продолжить, купите новые гигабайты.</p>
+                    {% else %}
                     <p><b>Срок и трафик:</b> доступ выдается на срок тарифа и с лимитом трафика — что закончится раньше. Трафик каждого пользователя считается отдельно, текущий расход виден в разделе «Мои подписки». При использовании лимита трафика доступ отключается — как и после истечения срока; чтобы продолжить, оплатите подписку заново (вы получите новый срок и свежий лимит). Уточнить действующий лимит можно в поддержке.</p>
+                    {% endif %}
                     <p><b>Поддерживаемые платформы:</b> Android, iOS и Windows. Для подключения используется приложение AmneziaWG.</p>
                     <p><b>Выделенный личный сервер:</b> для заказа обратитесь в поддержку ниже.</p>
                 </div>
@@ -403,6 +447,22 @@ async function orderTrial(serverId) {
     } catch (e) {
         showAlert('❌ ' + escapeHtml(e.message), 'danger');
     }
+}
+
+const GB_PRICE = {{ gb_price }};
+const MIN_GB = {{ min_gb }};
+function orderGb(serverId, gb) {
+    gb = parseInt(gb, 10);
+    if (!gb || gb < MIN_GB) {
+        alert('Минимальная покупка — ' + MIN_GB + ' ГБ');
+        return;
+    }
+    if (gb > 100000) { alert('Слишком большое количество гигабайт'); return; }
+    openBuyModal(serverId, gb + 'gb', gb * GB_PRICE);
+}
+function orderGbInput(serverId) {
+    const el = document.getElementById('gb-amount-' + serverId);
+    orderGb(serverId, el ? el.value : 0);
 }
 
 function openBuyModal(serverId, period, amount) {

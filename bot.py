@@ -99,7 +99,12 @@ async def check_expiring_3d():
 # --- ОТКЛЮЧЕНИЕ ПРОСРОЧЕННЫХ ---
 async def check_expired_users():
     expired_users = db.get_expired_users()
+    billing_gb = db.get_billing_mode() == "traffic"
     for tg_id, server_id, username in expired_users:
+        # Погигабайтная тарификация: срок мог выйти, но доступ живет,
+        # пока есть неизрасходованные гигабайты.
+        if billing_gb and (db.get_user_balance(tg_id, server_id) or 0) > 0:
+            continue
         server = db.get_server_by_id(server_id)
         if server:
             ip, port, srv_name = server[0], server[1], server[2]
@@ -151,7 +156,103 @@ async def check_traffic_limits():
     except (TypeError, ValueError):
         warn_percent = 0
 
+    # Погигабайтный режим: для подписок без действующего срока доступ решает кошелек ГБ.
+    billing_gb = db.get_billing_mode() == "traffic"
+
     for tg_id, server_id, username, limit_gb, used_bytes, warned in db.get_active_subs_with_traffic():
+        if billing_gb:
+            sub = db.get_user_sub(tg_id, server_id)
+            time_valid = bool(sub and sub[5] == 1 and sub[3] and traffic._expire_in_future(sub[3]))
+            if not time_valid:
+                # Срок не действует - подписка живет только на гигабайтах.
+                from datetime import datetime, timedelta
+                balance = db.get_user_balance(tg_id, server_id) or 0
+                server = db.get_server_by_id(server_id)
+                srv_name = server[2] if server else f"ID {server_id}"
+                if balance <= 0:
+                    # ГИГАБАЙТЫ КОНЧИЛИСЬ: отключаем как при исчерпании лимита
+                    cmd = f"bash /root/remove_user.sh {shlex.quote(username)}"
+                    result = await ssh.run_ssh_command(server[0] if server else "", server[1] if server else 2222, cmd)
+                    if "Ошибка" in str(result):
+                        print(f"❌ traffic: ошибка отключения {username}: {result}")
+                        continue
+                    db.deactivate_user(tg_id, server_id)
+                    db.mark_traffic_over(tg_id, server_id)
+                    if not db.is_virtual_tg_id(tg_id):
+                        try:
+                            builder = InlineKeyboardBuilder()
+                            builder.add(InlineKeyboardButton(
+                                text="📶 Купить гигабайты",
+                                url=(db.get_setting("site_url") or "https://amneziawg.fun").rstrip("/")))
+                            await bot.send_message(
+                                tg_id,
+                                f"⚠️ <b>Трафик исчерпан!</b>\n\n"
+                                f"Сервер: <b>{html.quote(srv_name)}</b>\n"
+                                f"Все купленные гигабайты израсходованы.\n\n"
+                                f"Доступ отключен. Чтобы продолжить — купите новые гигабайты: "
+                                f"оплаченный трафик не сгорает по времени.",
+                                reply_markup=builder.as_markup(), parse_mode="HTML")
+                        except Exception as _e:
+                            print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
+                    try:
+                        await bot.send_message(
+                            ADMIN_ID,
+                            f"🔴 <b>Гигабайты исчерпаны!</b>\nПользователь <code>{tg_id}</code> "
+                            f"отключен от сервера {html.quote(srv_name)} (баланс 0 ГБ).",
+                            parse_mode="HTML")
+                    except Exception as _e:
+                        print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
+                    continue
+
+                # НЕАКТИВНОСТЬ: трафик не расходовался N месяцев - отключаем
+                try:
+                    months_off = int(db.get_setting("inactive_months_off") or 0)
+                except (TypeError, ValueError):
+                    months_off = 0
+                if months_off > 0:
+                    gb_row = db.get_user_gb(tg_id, server_id)
+                    last_act = gb_row[2] if gb_row else None
+                    if last_act:
+                        try:
+                            last_dt = (datetime.strptime(last_act, "%Y-%m-%d %H:%M:%S.%f")
+                                       if "." in str(last_act)
+                                       else datetime.strptime(last_act, "%Y-%m-%d %H:%M:%S"))
+                            idle_limit = last_dt + timedelta(days=months_off * 30)
+                        except (TypeError, ValueError):
+                            idle_limit = None
+                        if idle_limit is not None and datetime.now() > idle_limit:
+                            cmd = f"bash /root/remove_user.sh {shlex.quote(username)}"
+                            result = await ssh.run_ssh_command(server[0] if server else "", server[1] if server else 2222, cmd)
+                            if "Ошибка" in str(result):
+                                print(f"❌ traffic: ошибка отключения {username}: {result}")
+                                continue
+                            db.deactivate_user(tg_id, server_id)
+                            if not db.is_virtual_tg_id(tg_id):
+                                try:
+                                    await bot.send_message(
+                                        tg_id,
+                                        f"😴 <b>Доступ отключен за неактивность</b>\n\n"
+                                        f"Сервер: <b>{html.quote(srv_name)}</b>\n"
+                                        f"Сервис не использовался более {months_off} мес. — "
+                                        f"доступ приостановлен.\n\n"
+                                        f"Ваши гигабайты сохранились. Купите новые (или напишите в "
+                                        f"поддержку) — доступ снова включится.",
+                                        parse_mode="HTML")
+                                except Exception as _e:
+                                    print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
+                            try:
+                                await bot.send_message(
+                                    ADMIN_ID,
+                                    f"😴 <b>Отключение за неактивность:</b> пользователь <code>{tg_id}</code> "
+                                    f"на сервере {html.quote(srv_name)} не расходовал трафик {months_off} мес.",
+                                    parse_mode="HTML")
+                            except Exception as _e:
+                                print(f"⚠️ Не удалось отправить сообщение в чат: {_e}")
+                            continue
+                # Кошелек жив, активность есть - лимиты по ГБ не проверяем
+                continue
+            # Срок еще действует - ниже обычная (сроковая) логика с лимитом трафика.
+
         limit_bytes = traffic.resolve_limit_bytes(limit_gb)
         if not limit_bytes:
             continue  # без лимита
